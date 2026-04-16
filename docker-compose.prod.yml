@@ -29,7 +29,7 @@ services:
       DB_DATABASE: ${DB_DATABASE}
       JWT_SECRET: ${JWT_SECRET}
       JWT_EXPIRES_IN: 7d
-      PORT: 3002
+      PORT: 3001
       NODE_ENV: production
       CORS_ORIGIN: ${CORS_ORIGIN}
     depends_on:
@@ -37,7 +37,7 @@ services:
     networks:
       - warehouse_net
     ports:
-      - '3001:3001'
+      - '3002:3001'
 
   frontend:
     build:
@@ -50,7 +50,7 @@ services:
     networks:
       - warehouse_net
     ports:
-      - '3000:80'
+      - '3003:80'
     depends_on:
       - backend
 

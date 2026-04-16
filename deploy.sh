@@ -16,7 +16,7 @@ echo "✅ .env found"
 
 # ── 2. Pull latest code ───────────────────────────────────────────────────────
 echo "📦 Pulling latest code..."
-git pull origin main
+git pull origin master
 
 # ── 3. Build and start containers ─────────────────────────────────────────────
 echo "🐳 Building Docker containers..."

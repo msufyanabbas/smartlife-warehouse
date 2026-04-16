@@ -269,3 +269,80 @@ select.form-input option { background: var(--bg-3); }
 
 @media (max-width: 1100px) { .grid-4 { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 768px) { .grid-4, .grid-3, .grid-2 { grid-template-columns: 1fr; } .page { padding: 20px; } }
+
+/* ── Light Mode ─────────────────────────────────────────────────────────── */
+[data-theme="light"] {
+  --bg: #f4f5f7;
+  --bg-2: #ffffff;
+  --bg-3: #f0f1f4;
+  --bg-4: #e4e6ed;
+  --border: #e0e2ea;
+  --border-light: #cdd0db;
+  --text: #0f1117;
+  --text-2: #4a5066;
+  --text-3: #8b90a8;
+  --accent: #4f7cff;
+  --accent-dim: rgba(79,124,255,0.1);
+  --accent-hover: #3a68f0;
+  --green: #16a34a;
+  --green-dim: rgba(22,163,74,0.1);
+  --yellow: #d97706;
+  --yellow-dim: rgba(217,119,6,0.1);
+  --red: #dc2626;
+  --red-dim: rgba(220,38,38,0.1);
+  --purple: #9333ea;
+  --purple-dim: rgba(147,51,234,0.1);
+  --shadow: 0 4px 24px rgba(0,0,0,0.08);
+}
+
+[data-theme="light"] html,
+[data-theme="light"] body,
+[data-theme="light"] #root {
+  background: var(--bg);
+  color: var(--text);
+}
+
+[data-theme="light"] .sidebar {
+  background: var(--bg-2);
+  border-right-color: var(--border);
+}
+
+[data-theme="light"] .modal-backdrop { background: rgba(0,0,0,0.3); }
+[data-theme="light"] .modal { background: var(--bg-2); }
+[data-theme="light"] .form-input { background: var(--bg-3); color: var(--text); }
+[data-theme="light"] .form-input:focus { background: var(--bg-2); }
+[data-theme="light"] table thead th { background: var(--bg-3); }
+[data-theme="light"] .search-bar { background: var(--bg-2); }
+[data-theme="light"] .nav-item:hover { background: var(--bg-3); }
+[data-theme="light"] .nav-item.active { background: var(--accent-dim); }
+[data-theme="light"] .btn-ghost { border-color: var(--border); color: var(--text-2); }
+[data-theme="light"] .btn-ghost:hover { background: var(--bg-3); }
+
+/* ── Theme Toggle ────────────────────────────────────────────────────────── */
+.theme-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: 99px;
+  padding: 3px;
+}
+
+.theme-toggle-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 99px;
+  border: none;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  transition: all 0.15s;
+  font-size: 13px;
+}
+
+.theme-toggle-btn:hover { color: var(--text); background: var(--bg-4); }
+.theme-toggle-btn.active { background: var(--bg-2); color: var(--accent); box-shadow: 0 1px 4px rgba(0,0,0,0.15); }

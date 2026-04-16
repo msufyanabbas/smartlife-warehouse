@@ -11,7 +11,7 @@ export const getDatabaseConfig = (
   password: configService.get<string>('DB_PASSWORD', 'postgres'),
   database: configService.get<string>('DB_DATABASE', 'warehouse_db'),
   entities: [__dirname + '/../**/*.entity{.ts,.js}'],
-  synchronize: configService.get<string>('NODE_ENV') !== 'production',
+  synchronize: true,
   logging: configService.get<string>('NODE_ENV') === 'development',
   ssl: false, // PostgreSQL runs in Docker on same network — no SSL needed
 });

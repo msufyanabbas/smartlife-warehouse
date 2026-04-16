@@ -27,7 +27,7 @@ export class UsersController {
   }
 
   @Get('workers')
-  @Roles(Role.ADMIN, Role.MANAGER, Role.WORKER)
+  @Roles(Role.ADMIN, Role.MANAGER)
   findWorkers() {
     return this.usersService.findWorkers();
   }
@@ -54,5 +54,11 @@ export class UsersController {
   @Roles(Role.ADMIN)
   remove(@Param('id') id: string) {
     return this.usersService.remove(id);
+  }
+
+  @Put(':id/deactivate')
+  @Roles(Role.ADMIN)
+  deactivate(@Param('id') id: string) {
+    return this.usersService.deactivate(id);
   }
 }

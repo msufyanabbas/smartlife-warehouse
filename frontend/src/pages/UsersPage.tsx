@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { Plus, Search, Users, Edit2, UserX } from 'lucide-react';
-import { useUsers, useCreateUser, useUpdateUser } from '../hooks/useApi';
+import { Plus, Search, Users, Edit2, UserX, Trash2 } from 'lucide-react';
+import { useUsers, useCreateUser, useUpdateUser, useDeleteUser, useDeactivateUser } from '../hooks/useApi';
 import { useAuth } from '../contexts/AuthContext';
 import { User } from '../types';
 import Modal from '../components/Modal';
@@ -127,6 +127,8 @@ export default function UsersPage() {
   const { data: users = [], isLoading } = useUsers();
   const createUser = useCreateUser();
   const updateUser = useUpdateUser();
+  const deleteUser = useDeleteUser();
+  const deactivateUser = useDeactivateUser();
 
   const isAdmin = currentUser?.role === 'admin';
 
@@ -287,12 +289,25 @@ export default function UsersPage() {
                         {u.id !== currentUser?.id && (
                           <button
                             className="btn btn-danger btn-sm btn-icon"
+                            title="Deactivate"
                             onClick={() => {
                               if (confirm(`Deactivate ${u.firstName}?`))
-                                updateUser.mutate({ id: u.id, data: { isActive: false } });
+                                deactivateUser.mutate(u.id);
                             }}
                           >
                             <UserX size={14} />
+                          </button>
+                        )}
+                        {u.id !== currentUser?.id && (
+                          <button
+                            className="btn btn-danger btn-sm btn-icon"
+                            title="Delete permanently"
+                            onClick={() => {
+                              if (confirm(`Permanently delete ${u.firstName} ${u.lastName}? This cannot be undone and will remove all their data.`))
+                                deleteUser.mutate(u.id);
+                            }}
+                          >
+                            <Trash2 size={14} />
                           </button>
                         )}
                       </div>

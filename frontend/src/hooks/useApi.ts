@@ -83,6 +83,24 @@ export const useUpdateUser = () => {
   });
 };
 
+export const useDeactivateUser = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.put(`/users/${id}/deactivate`, {}).then(r => r.data.data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['users'] }); toast.success('User deactivated'); },
+    onError: (e: any) => toast.error(e.response?.data?.message || 'Failed'),
+  });
+};
+
+export const useDeleteUser = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.delete(`/users/${id}`).then(r => r.data.data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['users'] }); toast.success('User deleted'); },
+    onError: (e: any) => toast.error(e.response?.data?.message || 'Failed to delete user'),
+  });
+};
+
 // ── Assignments ────────────────────────────────────────────────────────────
 export const useAssignments = () =>
   useQuery({

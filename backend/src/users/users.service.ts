@@ -44,6 +44,12 @@ export class UsersService {
 
   async remove(id: string) {
     const user = await this.findOne(id);
+    await this.userRepository.remove(user);
+    return { message: 'User deleted successfully' };
+  }
+
+  async deactivate(id: string) {
+    const user = await this.findOne(id);
     user.isActive = false;
     await this.userRepository.save(user);
     return { message: 'User deactivated successfully' };

@@ -29,7 +29,7 @@ services:
       DB_DATABASE: ${DB_DATABASE}
       JWT_SECRET: ${JWT_SECRET}
       JWT_EXPIRES_IN: 7d
-      PORT: 3001
+      PORT: 3002
       NODE_ENV: production
       CORS_ORIGIN: ${CORS_ORIGIN}
     depends_on:

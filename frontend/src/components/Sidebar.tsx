@@ -32,30 +32,63 @@ export default function Sidebar() {
     ? 'var(--yellow)'
     : 'var(--green)';
 
+  const roleBg = user?.role === 'admin'
+    ? 'var(--purple-dim)'
+    : user?.role === 'manager'
+    ? 'var(--yellow-dim)'
+    : 'var(--green-dim)';
+
   return (
     <aside className="sidebar">
-      {/* Logo */}
-      <div style={{ padding: '20px 16px', borderBottom: '1px solid var(--border)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+
+      {/* ── Logo ── */}
+      <div style={{ padding: '16px', borderBottom: '1px solid var(--border)' }}>
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+          background: 'rgba(255,255,255,0.03)',
+          padding: '8px 10px',
+          borderRadius: 12,
+          border: '1px solid rgba(255,255,255,0.05)',
+        }}>
           <div style={{
-            width: 36, height: 36, borderRadius: 10,
-            background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            width: 56, height: 32,
+            backgroundColor: '#fff',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            borderRadius: 10,
+            boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+            overflow: 'hidden',
             flexShrink: 0,
           }}>
-            <Package size={18} color="#fff" />
+            <img
+              src="/smartlife.png"
+              alt="Smart Life Logo"
+              style={{ width: '85%', height: '85%', objectFit: 'contain' }}
+            />
           </div>
           <div>
-            <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 15, color: 'var(--text)' }}>
+            <div style={{
+              fontFamily: 'var(--font-display)',
+              fontWeight: 700, fontSize: 16,
+              letterSpacing: '-0.02em',
+              color: 'var(--text)',
+            }}>
               StockFlow
             </div>
-            <div style={{ fontSize: 11, color: 'var(--text-3)' }}>Warehouse Management</div>
+            <div style={{
+              fontSize: 10, color: 'var(--text-3)',
+              textTransform: 'uppercase', letterSpacing: '0.1em', marginTop: -1,
+            }}>
+              Inventory System
+            </div>
           </div>
         </div>
       </div>
 
-      {/* Navigation */}
-      <nav style={{ flex: 1, padding: '12px 8px', overflow: 'auto' }}>
-        <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-3)', padding: '4px 24px 8px', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+      {/* ── Navigation ── */}
+      <nav style={{ flex: 1, padding: '12px 8px', overflowY: 'auto' }}>
+        <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-3)', padding: '4px 16px 8px', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
           Main
         </div>
 
@@ -69,7 +102,7 @@ export default function Sidebar() {
           <ClipboardList size={16} /> Assignments
         </NavLink>
 
-        <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-3)', padding: '16px 24px 4px', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+        <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-3)', padding: '16px 16px 8px', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
           Requests
         </div>
 
@@ -91,7 +124,7 @@ export default function Sidebar() {
 
         {isManager && (
           <>
-            <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-3)', padding: '16px 24px 4px', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+            <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-3)', padding: '16px 16px 8px', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
               Management
             </div>
             <NavLink to="/users" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
@@ -101,30 +134,51 @@ export default function Sidebar() {
         )}
       </nav>
 
-      {/* Bottom — user info + theme toggle + logout */}
+      {/* ── Bottom ── */}
       <div style={{ borderTop: '1px solid var(--border)', padding: '12px 16px' }}>
-        {/* Theme Toggle */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+
+        {/* Theme Toggle Row */}
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          marginBottom: 12,
+          padding: '6px 0',
+        }}>
           <span style={{ fontSize: 12, color: 'var(--text-3)' }}>Appearance</span>
           <ThemeToggle />
         </div>
 
-        {/* User info */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+        {/* User Info */}
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 10,
+          padding: '8px 10px', borderRadius: 10,
+          background: 'var(--bg-3)', border: '1px solid var(--border)',
+          marginBottom: 8,
+        }}>
           <div style={{
-            width: 32, height: 32, borderRadius: '50%', flexShrink: 0,
-            background: user?.role === 'admin' ? 'var(--purple-dim)' : user?.role === 'manager' ? 'var(--yellow-dim)' : 'var(--green-dim)',
+            width: 34, height: 34, borderRadius: '50%', flexShrink: 0,
+            background: roleBg,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             fontSize: 12, fontWeight: 700, color: roleColor,
           }}>
             {user?.firstName?.[0]}{user?.lastName?.[0]}
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            <div style={{
+              fontSize: 13, fontWeight: 600, color: 'var(--text)',
+              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+            }}>
               {user?.firstName} {user?.lastName}
             </div>
-            <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: roleColor }}>
-              {user?.role}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 1 }}>
+              <span style={{
+                fontSize: 10, fontWeight: 700, textTransform: 'uppercase',
+                letterSpacing: '0.06em', color: roleColor,
+              }}>
+                {user?.role}
+              </span>
+              {user?.department && (
+                <span style={{ fontSize: 11, color: 'var(--text-3)' }}>· {user.department}</span>
+              )}
             </div>
           </div>
         </div>
@@ -137,6 +191,7 @@ export default function Sidebar() {
         >
           <LogOut size={15} /> Sign out
         </button>
+
       </div>
     </aside>
   );

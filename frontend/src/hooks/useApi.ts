@@ -366,3 +366,78 @@ export const useAllAssignments = () =>
     queryKey: ['all-assignments'],
     queryFn: () => api.get('/assignments').then(r => r.data.data),
   });
+
+// ── Categories ─────────────────────────────────────────────────────────────
+export const useCategories = () =>
+  useQuery({ queryKey: ['categories'], queryFn: () => api.get('/categories').then(r => r.data.data) });
+
+export const useCategoriesFlat = () =>
+  useQuery({ queryKey: ['categories-flat'], queryFn: () => api.get('/categories/flat').then(r => r.data.data) });
+
+export const useCreateCategory = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: any) => api.post('/categories', data).then(r => r.data.data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['categories'] }); qc.invalidateQueries({ queryKey: ['categories-flat'] }); toast.success('Category created'); },
+    onError: (e: any) => toast.error(e.response?.data?.message || 'Failed'),
+  });
+};
+
+export const useUpdateCategory = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: any }) => api.put(`/categories/${id}`, data).then(r => r.data.data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['categories'] }); qc.invalidateQueries({ queryKey: ['categories-flat'] }); toast.success('Category updated'); },
+    onError: (e: any) => toast.error(e.response?.data?.message || 'Failed'),
+  });
+};
+
+export const useDeleteCategory = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.delete(`/categories/${id}`).then(r => r.data.data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['categories'] }); qc.invalidateQueries({ queryKey: ['categories-flat'] }); toast.success('Category removed'); },
+    onError: (e: any) => toast.error(e.response?.data?.message || 'Failed'),
+  });
+};
+
+// ── Products ───────────────────────────────────────────────────────────────
+export const useProducts = (search?: string, categoryId?: string) =>
+  useQuery({
+    queryKey: ['products', search, categoryId],
+    queryFn: () => api.get('/products', { params: { search, categoryId } }).then(r => r.data.data),
+  });
+
+export const useProductSearch = (q: string) =>
+  useQuery({
+    queryKey: ['products-search', q],
+    queryFn: () => api.get('/products/search', { params: { q } }).then(r => r.data.data),
+    enabled: q.length >= 1,
+  });
+
+export const useCreateProduct = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: any) => api.post('/products', data).then(r => r.data.data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['products'] }); toast.success('Product created'); },
+    onError: (e: any) => toast.error(e.response?.data?.message || 'Failed'),
+  });
+};
+
+export const useUpdateProduct = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: any }) => api.put(`/products/${id}`, data).then(r => r.data.data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['products'] }); toast.success('Product updated'); },
+    onError: (e: any) => toast.error(e.response?.data?.message || 'Failed'),
+  });
+};
+
+export const useDeleteProduct = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.delete(`/products/${id}`).then(r => r.data.data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['products'] }); toast.success('Product removed'); },
+    onError: (e: any) => toast.error(e.response?.data?.message || 'Failed'),
+  });
+};

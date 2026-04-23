@@ -13,6 +13,8 @@ import UsersPage from './pages/UsersPage';
 import UsagePage from './pages/UsagePage';
 import ReturnRequestsPage from './pages/ReturnRequestsPage';
 import ItemRequestsPage from './pages/ItemRequestsPage';
+import CategoriesPage from './pages/CategoriesPage';
+import ProductsPage from './pages/ProductsPage';
 import './styles/global.css';
 
 const queryClient = new QueryClient({
@@ -35,6 +37,8 @@ export default function App() {
                 <Route path="/transfers" element={<TransfersPage />} />
                 <Route path="/returns" element={<ReturnRequestsPage />} />
                 <Route path="/usage" element={<UsagePage />} />
+              <Route path="/categories" element={<RequireRole roles={['admin', 'manager']}><CategoriesPage /></RequireRole>} />
+              <Route path="/products" element={<RequireRole roles={['admin', 'manager']}><ProductsPage /></RequireRole>} />
                 <Route path="/users" element={
                   <RequireRole roles={['admin', 'manager']}>
                     <UsersPage />

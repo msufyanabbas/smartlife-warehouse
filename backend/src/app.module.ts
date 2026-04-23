@@ -11,12 +11,14 @@ import { AssignmentsModule } from './assignments/assignments.module';
 import { TransferRequestsModule } from './transfer-requests/transfer-requests.module';
 import { ItemUsageModule } from './item-usage/item-usage.module';
 import { ReturnRequestsModule } from './return-requests/return-requests.module';
+import { ItemRequestsModule } from './item-requests/item-requests.module';
+import { CategoriesModule } from './categories/categories.module';
+import { ProductsModule } from './products/products.module';
 
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
-import { ItemRequestsModule } from './item-requests/item-requests.module';
 
 @Module({
   imports: [
@@ -28,12 +30,14 @@ import { ItemRequestsModule } from './item-requests/item-requests.module';
     }),
     AuthModule,
     UsersModule,
+    CategoriesModule,
+    ProductsModule,
     InventoryModule,
     AssignmentsModule,
     TransferRequestsModule,
     ItemUsageModule,
     ReturnRequestsModule,
-    ItemRequestsModule
+    ItemRequestsModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: JwtAuthGuard },

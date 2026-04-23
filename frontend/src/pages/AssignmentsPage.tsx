@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import * as XLSX from 'xlsx';
-import { Plus, Search, ClipboardList, RotateCcw, Activity, Download } from 'lucide-react';
+import { Plus, Search, ClipboardList, RotateCcw, Activity, Download, Trash2, CheckCircle } from 'lucide-react';
 import {
   useAssignments, useCreateAssignment, useCreateReturnRequest,
   useWorkers, useInventory, useCreateUsage, useAssignmentUsage,
@@ -10,138 +10,124 @@ import type { Assignment, ItemUsage } from '../types';
 import Modal from '../components/Modal';
 import { formatDistanceToNow, format } from 'date-fns';
 
-// ─── Assign Form ──────────────────────────────────────────────────────────────
-// Defined OUTSIDE the page component to prevent remount on every keystroke
-interface AssignFormProps {
-  form: { assignedToId: string; itemId: string; quantity: number; notes: string };
-  onChange: (form: any) => void;
-  workers: any[];
+// ── Item Row with autocomplete for assignment ──────────────────────────────
+function ItemRow({ row, index, onUpdate, onRemove, usedItemIds, availableItems }: {
+  row: any; index: number;
+  onUpdate: (i: number, f: string, v: any) => void;
+  onRemove: (i: number) => void;
+  usedItemIds: string[];
   availableItems: any[];
-  selectedItem: any;
-}
+}) {
+  const [query, setQuery] = useState(row.itemName || '');
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
 
-function AssignForm({ form, onChange, workers, availableItems, selectedItem }: AssignFormProps) {
+  const filtered = availableItems.filter(i =>
+    (!usedItemIds.includes(i.id) || i.id === row.itemId) &&
+    (!query || i.name.toLowerCase().includes(query.toLowerCase()) || i.sku.toLowerCase().includes(query.toLowerCase()))
+  );
+
+  const select = (item: any) => {
+    setQuery(item.name); setOpen(false);
+    onUpdate(index, 'itemId', item.id);
+    onUpdate(index, 'itemName', item.name);
+    onUpdate(index, 'sku', item.sku);
+    onUpdate(index, 'maxQty', item.availableQuantity);
+    onUpdate(index, 'quantity', 1);
+  };
+
+  useEffect(() => {
+    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, []);
+
+  const tdStyle = { padding: '4px 6px' };
+
   return (
-    <>
-      <div className="form-group">
-        <label className="form-label">Worker *</label>
-        <select className="form-input" value={form.assignedToId}
-          onChange={e => onChange({ ...form, assignedToId: e.target.value })}>
-          <option value="">Select worker…</option>
-          {workers.map((w: any) => (
-            <option key={w.id} value={w.id}>
-              {w.firstName} {w.lastName} {w.department ? `(${w.department})` : ''}
-            </option>
-          ))}
-        </select>
-      </div>
-      <div className="form-group">
-        <label className="form-label">Item *</label>
-        <select className="form-input" value={form.itemId}
-          onChange={e => onChange({ ...form, itemId: e.target.value, quantity: 1 })}>
-          <option value="">Select item…</option>
-          {availableItems.map((i: any) => (
-            <option key={i.id} value={i.id}>
-              {i.name} (SKU: {i.sku}) — {i.availableQuantity} available
-            </option>
-          ))}
-        </select>
-      </div>
-      <div className="form-group">
-        <label className="form-label">
-          Quantity *
-          {selectedItem && (
-            <span style={{ color: 'var(--text-3)', marginLeft: 8 }}>
-              max {selectedItem.availableQuantity}
-            </span>
+    <tr style={{ borderBottom: '1px solid var(--border)' }}>
+      <td style={{ ...tdStyle, width: 28, textAlign: 'center', color: 'var(--text-3)', fontSize: 12 }}>{index + 1}</td>
+      <td style={{ ...tdStyle, minWidth: 220 }}>
+        <div ref={ref} style={{ position: 'relative' }}>
+          <div style={{ position: 'relative' }}>
+            <input className="form-input" style={{ paddingRight: row.itemId ? 28 : 10, fontSize: 13 }}
+              value={query}
+              onChange={e => { setQuery(e.target.value); if (!e.target.value) { onUpdate(index, 'itemId', ''); onUpdate(index, 'itemName', ''); onUpdate(index, 'sku', ''); } setOpen(true); }}
+              onFocus={() => setOpen(true)}
+              placeholder="Search item by name or SKU…" />
+            {row.itemId && <CheckCircle size={13} style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', color: 'var(--green)' }} />}
+          </div>
+          {open && filtered.length > 0 && (
+            <div style={{ position: 'absolute', top: 'calc(100% + 2px)', left: 0, right: 0, zIndex: 999, background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 10, boxShadow: '0 8px 32px rgba(0,0,0,0.35)', overflow: 'hidden', maxHeight: 200, overflowY: 'auto' }}>
+              {filtered.map((item: any) => (
+                <div key={item.id} onMouseDown={() => select(item)}
+                  style={{ padding: '9px 14px', cursor: 'pointer', borderBottom: '1px solid var(--border)' }}
+                  onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent-dim)')}
+                  onMouseLeave={e => (e.currentTarget.style.background = '')}>
+                  <div style={{ fontWeight: 500, fontSize: 13 }}>{item.name}</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 1 }}>
+                    SKU: {item.sku} · {item.availableQuantity} available{item.schemeNo ? ` · ${item.schemeNo}` : ''}
+                  </div>
+                </div>
+              ))}
+            </div>
           )}
-        </label>
-        <input type="number" min={1} max={selectedItem?.availableQuantity || 999}
-          className="form-input" value={form.quantity}
-          onChange={e => onChange({ ...form, quantity: +e.target.value })} />
-      </div>
-      <div className="form-group">
-        <label className="form-label">Notes (optional)</label>
-        <textarea className="form-input" rows={2} value={form.notes}
-          onChange={e => onChange({ ...form, notes: e.target.value })} />
-      </div>
-    </>
-  );
-}
-
-// ─── Usage Form ───────────────────────────────────────────────────────────────
-interface UsageFormProps {
-  form: { quantityUsed: number; taskNo: string; projectName: string; notes: string; usedAt: string };
-  onChange: (form: any) => void;
-  maxQty: number;
-}
-
-function UsageForm({ form, onChange, maxQty }: UsageFormProps) {
-  return (
-    <>
-      <div className="grid-2">
-        <div className="form-group">
-          <label className="form-label">Task No. *</label>
-          <input className="form-input" value={form.taskNo}
-            onChange={e => onChange({ ...form, taskNo: e.target.value })}
-            placeholder="e.g. TASK-001" />
         </div>
-        <div className="form-group">
-          <label className="form-label">Quantity Used *</label>
-          <input type="number" min={1} max={maxQty} className="form-input"
-            value={form.quantityUsed}
-            onChange={e => onChange({ ...form, quantityUsed: +e.target.value })} />
-        </div>
-      </div>
-      <div className="form-group">
-        <label className="form-label">Project Name *</label>
-        <input className="form-input" value={form.projectName}
-          onChange={e => onChange({ ...form, projectName: e.target.value })}
-          placeholder="Project name" />
-      </div>
-      <div className="form-group">
-        <label className="form-label">Date Used</label>
-        <input type="date" className="form-input" value={form.usedAt}
-          onChange={e => onChange({ ...form, usedAt: e.target.value })} />
-      </div>
-      <div className="form-group">
-        <label className="form-label">Notes (optional)</label>
-        <textarea className="form-input" rows={2} value={form.notes}
-          onChange={e => onChange({ ...form, notes: e.target.value })}
-          placeholder="Where or how used…" />
-      </div>
-    </>
+      </td>
+      <td style={{ ...tdStyle, width: 90 }}>
+        <code style={{ fontSize: 11, color: 'var(--accent)' }}>{row.sku || '—'}</code>
+      </td>
+      <td style={{ ...tdStyle, width: 80 }}>
+        <input className="form-input" type="number" min="1" max={row.maxQty || 999}
+          style={{ fontSize: 13, textAlign: 'center' }}
+          value={row.quantity}
+          onChange={e => onUpdate(index, 'quantity', Math.min(parseInt(e.target.value) || 1, row.maxQty || 9999))} />
+      </td>
+      <td style={{ ...tdStyle, width: 60, textAlign: 'center', fontSize: 12, color: row.maxQty ? 'var(--green)' : 'var(--text-3)' }}>
+        {row.maxQty || '—'}
+      </td>
+      <td style={{ ...tdStyle }}>
+        <input className="form-input" style={{ fontSize: 12 }} value={row.notes} onChange={e => onUpdate(index, 'notes', e.target.value)} placeholder="Notes" />
+      </td>
+      <td style={{ ...tdStyle, width: 36, textAlign: 'center' }}>
+        <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red)', padding: 4 }} onClick={() => onRemove(index)}>
+          <Trash2 size={13} />
+        </button>
+      </td>
+    </tr>
   );
 }
 
-// ─── Return Form ──────────────────────────────────────────────────────────────
-interface ReturnFormProps {
-  quantity: number;
-  notes: string;
-  maxQty: number;
-  onQuantityChange: (q: number) => void;
-  onNotesChange: (n: string) => void;
-}
+const newItemRow = () => ({ itemId: '', itemName: '', sku: '', quantity: 1, maxQty: 0, notes: '' });
+const thStyle: React.CSSProperties = { padding: '8px 10px', fontSize: 11, color: 'var(--text-3)', fontWeight: 600, textAlign: 'left', background: 'var(--bg-3)' };
 
-function ReturnForm({ quantity, notes, maxQty, onQuantityChange, onNotesChange }: ReturnFormProps) {
+// Log Use form rows
+function UsageRow({ row, index, onUpdate, onRemove }: { row: any; index: number; onUpdate: (i: number, f: string, v: any) => void; onRemove: (i: number) => void; }) {
   return (
-    <>
-      <div className="form-group">
-        <label className="form-label">Quantity to return (max {maxQty})</label>
-        <input type="number" min={1} max={maxQty} className="form-input"
-          value={quantity} onChange={e => onQuantityChange(+e.target.value)} />
-      </div>
-      <div className="form-group">
-        <label className="form-label">Notes (optional)</label>
-        <textarea className="form-input" rows={2} value={notes}
-          onChange={e => onNotesChange(e.target.value)}
-          placeholder="Reason for return…" />
-      </div>
-    </>
+    <tr style={{ borderBottom: '1px solid var(--border)' }}>
+      <td style={{ padding: '4px 6px', width: 28, textAlign: 'center', fontSize: 12, color: 'var(--text-3)' }}>{index + 1}</td>
+      <td style={{ padding: '4px 6px', fontSize: 13, fontWeight: 500 }}>{row.itemName}</td>
+      <td style={{ padding: '4px 6px', width: 80 }}>
+        <input className="form-input" type="number" min="1" max={row.maxQty}
+          style={{ fontSize: 13, textAlign: 'center' }}
+          value={row.quantityUsed}
+          onChange={e => onUpdate(index, 'quantityUsed', Math.min(parseInt(e.target.value) || 1, row.maxQty))} />
+      </td>
+      <td style={{ padding: '4px 6px', width: 120 }}>
+        <input className="form-input" style={{ fontSize: 12 }} value={row.taskNo} onChange={e => onUpdate(index, 'taskNo', e.target.value)} placeholder="TASK-001" />
+      </td>
+      <td style={{ padding: '4px 6px' }}>
+        <input className="form-input" style={{ fontSize: 12 }} value={row.projectName} onChange={e => onUpdate(index, 'projectName', e.target.value)} placeholder="Project" />
+      </td>
+      <td style={{ padding: '4px 6px', width: 36, textAlign: 'center' }}>
+        <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red)', padding: 4 }} onClick={() => onRemove(index)}>
+          <Trash2 size={13} />
+        </button>
+      </td>
+    </tr>
   );
 }
 
-// ─── Page ─────────────────────────────────────────────────────────────────────
 export default function AssignmentsPage() {
   const { user } = useAuth();
   const { data: assignments = [], isLoading } = useAssignments();
@@ -150,102 +136,97 @@ export default function AssignmentsPage() {
   const createAssignment = useCreateAssignment();
   const createReturnRequest = useCreateReturnRequest();
   const createUsage = useCreateUsage();
-
   const isManager = user?.role === 'admin' || user?.role === 'manager';
 
   const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('active');
   const [workerFilter, setWorkerFilter] = useState('');
-  const [itemFilter, setItemFilter] = useState('');
 
-  const [showCreate, setShowCreate] = useState(false);
+  // Multi-assign modal
+  const [showAssign, setShowAssign] = useState(false);
+  const [assignWorker, setAssignWorker] = useState('');
+  const [assignRows, setAssignRows] = useState([newItemRow()]);
+
+  // Return modal
   const [returnTarget, setReturnTarget] = useState<Assignment | null>(null);
+  const [returnForm, setReturnForm] = useState({ quantity: 1, notes: '' });
+
+  // Usage modal
   const [usageTarget, setUsageTarget] = useState<Assignment | null>(null);
-  const [showUsageLog, setShowUsageLog] = useState<Assignment | null>(null);
+  const [usageRows, setUsageRows] = useState<any[]>([]);
+  const [usageDate, setUsageDate] = useState('');
 
-  const [assignForm, setAssignForm] = useState({ assignedToId: '', itemId: '', quantity: 1, notes: '' });
-  const [returnQty, setReturnQty] = useState(1);
-  const [returnNote, setReturnNote] = useState('');
-  const [usageForm, setUsageForm] = useState({
-    quantityUsed: 1, taskNo: '', projectName: '', notes: '', usedAt: '',
-  });
+  const { data: assignmentUsage = [] } = useAssignmentUsage(usageTarget?.id || '');
 
-  const list = (assignments as Assignment[]).filter(a => {
-    const q = search.toLowerCase();
-    const matchSearch = !q ||
-      a.item?.name.toLowerCase().includes(q) ||
-      a.assignedTo?.firstName.toLowerCase().includes(q) ||
-      a.assignedTo?.lastName.toLowerCase().includes(q);
-    const matchWorker = !workerFilter || a.assignedToId === workerFilter;
-    const matchItem = !itemFilter || a.itemId === itemFilter;
-    return matchSearch && matchWorker && matchItem;
-  });
-
-  const activeFilters = [workerFilter, itemFilter].filter(Boolean).length;
+  const allAssignments = assignments as Assignment[];
   const availableItems = (inventory as any[]).filter((i: any) => i.availableQuantity > 0);
-  const selectedItem = (inventory as any[]).find((i: any) => i.id === assignForm.itemId);
 
-  const handleCreate = async () => {
-    await createAssignment.mutateAsync(assignForm);
-    setShowCreate(false);
-    setAssignForm({ assignedToId: '', itemId: '', quantity: 1, notes: '' });
+  const list = allAssignments.filter(a => {
+    const q = search.toLowerCase();
+    const matchSearch = !q || a.item?.name.toLowerCase().includes(q) || a.assignedTo?.firstName.toLowerCase().includes(q) || a.item?.sku?.toLowerCase().includes(q);
+    const matchStatus = !statusFilter || a.status === statusFilter;
+    const matchWorker = !workerFilter || a.assignedToId === workerFilter;
+    return matchSearch && matchStatus && matchWorker;
+  });
+
+  const usedItemIds = assignRows.map(r => r.itemId).filter(Boolean);
+  const updateAssignRow = useCallback((i: number, f: string, v: any) => setAssignRows(prev => prev.map((r, idx) => idx === i ? { ...r, [f]: v } : r)), []);
+  const removeAssignRow = useCallback((i: number) => setAssignRows(prev => prev.filter((_, idx) => idx !== i)), []);
+  const updateUsageRow = useCallback((i: number, f: string, v: any) => setUsageRows(prev => prev.map((r, idx) => idx === i ? { ...r, [f]: v } : r)), []);
+  const removeUsageRow = useCallback((i: number) => setUsageRows(prev => prev.filter((_, idx) => idx !== i)), []);
+
+  const handleAssign = async () => {
+    if (!assignWorker) { alert('Select a worker'); return; }
+    const valid = assignRows.filter(r => r.itemId && r.quantity > 0);
+    if (valid.length === 0) { alert('Add at least one item'); return; }
+    for (const row of valid) {
+      await createAssignment.mutateAsync({ assignedToId: assignWorker, itemId: row.itemId, quantity: row.quantity, notes: row.notes || undefined });
+    }
+    setShowAssign(false);
   };
 
   const handleReturn = async () => {
     if (!returnTarget) return;
-    await createReturnRequest.mutateAsync({
-      assignmentId: returnTarget.id,
-      itemId: returnTarget.itemId,
-      quantity: returnQty,
-      notes: returnNote,
-    });
+    await createReturnRequest.mutateAsync({ assignmentId: returnTarget.id, itemId: returnTarget.itemId, quantity: returnForm.quantity, notes: returnForm.notes || undefined });
     setReturnTarget(null);
-    setReturnNote('');
-    setReturnQty(1);
   };
 
-  const handleLogUsage = async () => {
-    if (!usageTarget) return;
-    await createUsage.mutateAsync({
-      itemId: usageTarget.itemId,
-      assignmentId: usageTarget.id,
-      ...usageForm,
-    });
+  const openUsage = (a: Assignment) => {
+    setUsageRows([{ assignmentId: a.id, itemId: a.itemId, itemName: a.item?.name, quantityUsed: 1, maxQty: a.quantity, taskNo: '', projectName: a.item?.projectName || '' }]);
+    setUsageDate('');
+    setUsageTarget(a);
+  };
+
+  const handleUsage = async () => {
+    const valid = usageRows.filter(r => r.quantityUsed > 0 && r.taskNo && r.projectName);
+    if (valid.length === 0) { alert('Fill Task No. and Project for each row'); return; }
+    for (const row of valid) {
+      await createUsage.mutateAsync({ assignmentId: row.assignmentId, itemId: row.itemId, quantityUsed: row.quantityUsed, taskNo: row.taskNo, projectName: row.projectName, usedAt: usageDate || undefined });
+    }
     setUsageTarget(null);
-    setUsageForm({ quantityUsed: 1, taskNo: '', projectName: '', notes: '', usedAt: '' });
   };
 
-  const exportToExcel = () => {
-    const rows = list.map(a => ({
-      'Item': a.item?.name,
-      'SKU': a.item?.sku,
-      'Assigned To': `${a.assignedTo?.firstName} ${a.assignedTo?.lastName}`,
-      'Assigned By': a.assignedBy ? `${a.assignedBy.firstName} ${a.assignedBy.lastName}` : '',
-      'Quantity': a.quantity,
-      'Status': a.status,
-      'Assigned Date': new Date(a.createdAt).toLocaleDateString(),
+  const exportExcel = () => {
+    const data = list.map(a => ({
+      'Worker': `${a.assignedTo?.firstName} ${a.assignedTo?.lastName}`,
+      'Item': a.item?.name, 'SKU': a.item?.sku, 'Quantity': a.quantity,
+      'Scheme': a.item?.schemeNo, 'Project': a.item?.projectName,
+      'Status': a.status, 'Assigned': format(new Date(a.createdAt), 'yyyy-MM-dd'),
     }));
-    const ws = XLSX.utils.json_to_sheet(rows);
-    ws['!cols'] = Object.keys(rows[0] || {}).map(() => ({ wch: 20 }));
+    const ws = XLSX.utils.json_to_sheet(data);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Assignments');
-    XLSX.writeFile(wb, `assignments-${new Date().toISOString().slice(0,10)}.xlsx`);
+    XLSX.writeFile(wb, `assignments-${new Date().toISOString().split('T')[0]}.xlsx`);
   };
 
   return (
     <div className="page">
       <div className="page-header flex items-center justify-between">
-        <div>
-          <h1>Assignments</h1>
-          <p>{list.length} active assignment{list.length !== 1 ? 's' : ''}</p>
-        </div>
+        <div><h1>Assignments</h1><p>{list.length} assignment{list.length !== 1 ? 's' : ''}</p></div>
         <div className="flex gap-2">
-          {list.length > 0 && (
-            <button className="btn btn-ghost" onClick={exportToExcel}>
-              <Download size={14} /> Export Excel
-            </button>
-          )}
+          <button className="btn btn-ghost" onClick={exportExcel}><Download size={14} /> Export</button>
           {isManager && (
-            <button className="btn btn-primary" onClick={() => setShowCreate(true)}>
+            <button className="btn btn-primary" onClick={() => { setAssignWorker(''); setAssignRows([newItemRow()]); setShowAssign(true); }}>
               <Plus size={15} /> Assign Items
             </button>
           )}
@@ -253,39 +234,21 @@ export default function AssignmentsPage() {
       </div>
 
       {/* Filters */}
-      <div style={{ background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', padding: '16px 20px', marginBottom: 20 }}>
-        <div className="flex items-center justify-between" style={{ marginBottom: 12 }}>
-          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-2)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-            Filters {activeFilters > 0 && <span className="badge badge-blue" style={{ marginLeft: 6 }}>{activeFilters}</span>}
-          </span>
-          {(activeFilters > 0 || search) && (
-            <button className="btn btn-ghost btn-sm"
-              onClick={() => { setWorkerFilter(''); setItemFilter(''); setSearch(''); }}>
-              Clear all
-            </button>
-          )}
-        </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 10 }}>
-          <div className="search-bar" style={{ gridColumn: '1 / -1' }}>
+      <div style={{ background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', padding: '14px 18px', marginBottom: 20 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: 10 }}>
+          <div className="search-bar">
             <Search size={14} />
-            <input placeholder="Search by worker or item…" value={search}
-              onChange={e => setSearch(e.target.value)} style={{ width: '100%' }} />
+            <input placeholder="Search item, worker, SKU…" value={search} onChange={e => setSearch(e.target.value)} />
           </div>
-          {isManager && (
-            <select className="form-input" value={workerFilter}
-              onChange={e => setWorkerFilter(e.target.value)}>
-              <option value="">All Workers</option>
-              {(workers as any[]).map(w => (
-                <option key={w.id} value={w.id}>{w.firstName} {w.lastName}</option>
-              ))}
-            </select>
-          )}
-          <select className="form-input" value={itemFilter}
-            onChange={e => setItemFilter(e.target.value)}>
-            <option value="">All Items</option>
-            {(inventory as any[]).map((i: any) => (
-              <option key={i.id} value={i.id}>{i.name}</option>
-            ))}
+          <select className="form-input" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
+            <option value="">All Statuses</option>
+            <option value="active">Active</option>
+            <option value="returned">Returned</option>
+            <option value="transferred">Transferred</option>
+          </select>
+          <select className="form-input" value={workerFilter} onChange={e => setWorkerFilter(e.target.value)}>
+            <option value="">All Workers</option>
+            {(workers as any[]).map((w: any) => <option key={w.id} value={w.id}>{w.firstName} {w.lastName}</option>)}
           </select>
         </div>
       </div>
@@ -293,69 +256,37 @@ export default function AssignmentsPage() {
       {isLoading ? (
         <div className="empty-state"><ClipboardList size={40} /><span>Loading…</span></div>
       ) : list.length === 0 ? (
-        <div className="empty-state"><ClipboardList size={40} /><span>No active assignments found</span></div>
+        <div className="empty-state"><ClipboardList size={40} /><span>No assignments found</span></div>
       ) : (
         <div className="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>Item</th>
-                <th>Assigned To</th>
-                {isManager && <th>Assigned By</th>}
-                <th>Qty</th>
-                <th>Assigned</th>
-                <th>Actions</th>
+                <th>Worker</th><th>Item</th><th>SKU</th><th>Scheme / Project</th>
+                <th style={{ textAlign: 'center' }}>Qty</th>
+                <th>Status</th><th>Assigned</th><th>Actions</th>
               </tr>
             </thead>
             <tbody>
               {list.map(a => (
                 <tr key={a.id}>
                   <td>
-                    <div style={{ fontWeight: 500 }}>{a.item?.name}</div>
-                    <div style={{ fontSize: 11, color: 'var(--text-3)' }}>{a.item?.sku}</div>
+                    <div style={{ fontWeight: 500 }}>{a.assignedTo?.firstName} {a.assignedTo?.lastName}</div>
+                    {a.assignedTo?.department && <div style={{ fontSize: 11, color: 'var(--text-3)' }}>{a.assignedTo.department}</div>}
                   </td>
+                  <td style={{ fontWeight: 500 }}>{a.item?.name}</td>
+                  <td><code style={{ fontSize: 11, background: 'var(--bg-3)', padding: '2px 6px', borderRadius: 4, color: 'var(--accent)' }}>{a.item?.sku}</code></td>
+                  <td style={{ fontSize: 12, color: 'var(--text-2)' }}>{a.item?.schemeNo} {a.item?.projectName ? `/ ${a.item.projectName}` : ''}</td>
+                  <td style={{ textAlign: 'center', fontWeight: 700 }}>{a.quantity}</td>
+                  <td><span className={`badge badge-${a.status === 'active' ? 'green' : a.status === 'returned' ? 'gray' : 'blue'}`}>{a.status}</span></td>
+                  <td style={{ fontSize: 12, color: 'var(--text-3)' }}>{formatDistanceToNow(new Date(a.createdAt), { addSuffix: true })}</td>
                   <td>
-                    <div style={{ fontWeight: 500 }}>
-                      {a.assignedTo?.firstName} {a.assignedTo?.lastName}
-                    </div>
-                    <div style={{ fontSize: 11, color: 'var(--text-3)', textTransform: 'capitalize' }}>
-                      {a.assignedTo?.role}
-                    </div>
-                  </td>
-                  {isManager && (
-                    <td style={{ color: 'var(--text-2)', fontSize: 12 }}>
-                      {a.assignedBy ? `${a.assignedBy.firstName} ${a.assignedBy.lastName}` : '—'}
-                    </td>
-                  )}
-                  <td><span className="badge badge-blue">{a.quantity}×</span></td>
-                  <td style={{ color: 'var(--text-2)', fontSize: 12 }}>
-                    {formatDistanceToNow(new Date(a.createdAt), { addSuffix: true })}
-                  </td>
-                  <td>
-                    <div className="flex gap-2">
-                      {(isManager || a.assignedToId === user?.id) && (
-                        <button className="btn btn-ghost btn-sm" title="Log Usage"
-                          onClick={() => {
-                            setUsageTarget(a);
-                            setUsageForm({
-                              quantityUsed: 1, taskNo: '', notes: '', usedAt: '',
-                              projectName: (a.item as any)?.projectName || '',
-                            });
-                          }}>
-                          <Activity size={13} /> Log Use
-                        </button>
-                      )}
-                      {(isManager || a.assignedToId === user?.id) && (
-                        <button className="btn btn-ghost btn-sm"
-                          onClick={() => { setReturnTarget(a); setReturnQty(1); setReturnNote(''); }}>
-                          <RotateCcw size={13} /> Return
-                        </button>
-                      )}
-                      <button className="btn btn-ghost btn-sm btn-icon" title="View usage history"
-                        onClick={() => setShowUsageLog(a)}>
-                        <ClipboardList size={13} />
-                      </button>
-                    </div>
+                    {a.status === 'active' && (
+                      <div className="flex gap-2">
+                        <button className="btn btn-ghost btn-sm" onClick={() => openUsage(a)}><Activity size={13} /> Log Use</button>
+                        <button className="btn btn-ghost btn-sm" onClick={() => { setReturnTarget(a); setReturnForm({ quantity: a.quantity, notes: '' }); }}><RotateCcw size={13} /> Return</button>
+                      </div>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -364,131 +295,111 @@ export default function AssignmentsPage() {
         </div>
       )}
 
-      {/* Assign Modal */}
-      <Modal isOpen={showCreate} onClose={() => setShowCreate(false)} title="Assign Items to Worker"
+      {/* Multi-Assign Modal */}
+      <Modal isOpen={showAssign} onClose={() => setShowAssign(false)} title="Assign Items to Worker" size="lg"
         footer={<>
-          <button className="btn btn-ghost" onClick={() => setShowCreate(false)}>Cancel</button>
-          <button className="btn btn-primary" onClick={handleCreate}
-            disabled={createAssignment.isPending || !assignForm.assignedToId || !assignForm.itemId || assignForm.quantity < 1}>
-            {createAssignment.isPending ? 'Assigning…' : 'Assign Items'}
+          <button className="btn btn-ghost" onClick={() => setShowAssign(false)}>Cancel</button>
+          <button className="btn btn-primary" onClick={handleAssign} disabled={createAssignment.isPending || !assignWorker}>
+            {createAssignment.isPending ? 'Assigning…' : `Assign ${assignRows.filter(r => r.itemId).length} Item(s)`}
           </button>
         </>}>
-        <AssignForm
-          form={assignForm}
-          onChange={setAssignForm}
-          workers={workers as any[]}
-          availableItems={availableItems}
-          selectedItem={selectedItem}
-        />
+        <div className="form-group">
+          <label className="form-label">Worker *</label>
+          <select className="form-input" value={assignWorker} onChange={e => setAssignWorker(e.target.value)}>
+            <option value="">Select worker…</option>
+            {(workers as any[]).map((w: any) => <option key={w.id} value={w.id}>{w.firstName} {w.lastName}{w.department ? ` (${w.department})` : ''}</option>)}
+          </select>
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--accent)', background: 'var(--accent-dim)', borderRadius: 8, padding: '8px 12px', marginBottom: 12 }}>
+          💡 Search for items by name or SKU. Add multiple rows to assign several items at once.
+        </div>
+        <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 8 }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr>
+                <th style={thStyle}>#</th>
+                <th style={thStyle}>Item</th>
+                <th style={thStyle}>SKU</th>
+                <th style={{ ...thStyle, textAlign: 'center' }}>Qty</th>
+                <th style={{ ...thStyle, textAlign: 'center' }}>Avail.</th>
+                <th style={thStyle}>Notes</th>
+                <th style={thStyle}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {assignRows.map((row, idx) => (
+                <ItemRow key={idx} row={row} index={idx} onUpdate={updateAssignRow} onRemove={removeAssignRow} usedItemIds={usedItemIds} availableItems={availableItems} />
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <button className="btn btn-ghost" style={{ marginTop: 10, width: '100%', justifyContent: 'center' }} onClick={() => setAssignRows(prev => [...prev, newItemRow()])}>
+          <Plus size={14} /> Add Another Item
+        </button>
       </Modal>
 
-      {/* Log Usage Modal */}
-      <Modal isOpen={!!usageTarget} onClose={() => setUsageTarget(null)} title="Log Item Usage" maxWidth={460}
-        footer={<>
-          <button className="btn btn-ghost" onClick={() => setUsageTarget(null)}>Cancel</button>
-          <button className="btn btn-primary" onClick={handleLogUsage}
-            disabled={createUsage.isPending || !usageForm.taskNo || !usageForm.projectName || usageForm.quantityUsed < 1}>
-            {createUsage.isPending ? 'Logging…' : 'Log Usage'}
-          </button>
-        </>}>
-        {usageTarget && (
-          <>
-            <div style={{ background: 'var(--bg-3)', borderRadius: 'var(--radius)', padding: '12px 16px' }}>
-              <div style={{ fontWeight: 500 }}>{usageTarget.item?.name}</div>
-              <div style={{ fontSize: 12, color: 'var(--text-2)', marginTop: 3 }}>
-                Assigned qty: <strong style={{ color: 'var(--text)' }}>{usageTarget.quantity}</strong>
-              </div>
-            </div>
-            <UsageForm
-              form={usageForm}
-              onChange={setUsageForm}
-              maxQty={usageTarget.quantity}
-            />
-          </>
-        )}
-      </Modal>
-
-      {/* Return Modal — now submits a request for approval */}
-      <Modal isOpen={!!returnTarget} onClose={() => setReturnTarget(null)} title="Request Item Return" maxWidth={420}
+      {/* Return Modal */}
+      <Modal isOpen={!!returnTarget} onClose={() => setReturnTarget(null)} title="Request Return"
         footer={<>
           <button className="btn btn-ghost" onClick={() => setReturnTarget(null)}>Cancel</button>
-          <button className="btn btn-success" onClick={handleReturn} disabled={createReturnRequest.isPending}>
+          <button className="btn btn-primary" onClick={handleReturn} disabled={createReturnRequest.isPending}>
             {createReturnRequest.isPending ? 'Submitting…' : 'Submit Return Request'}
           </button>
         </>}>
         {returnTarget && (
           <>
-            <div style={{
-              background: 'var(--yellow-dim)', border: '1px solid rgba(245,158,11,0.2)',
-              borderRadius: 'var(--radius)', padding: '10px 14px',
-              fontSize: 12, color: 'var(--yellow)', marginBottom: 4,
-            }}>
-              This will send a return request to your manager for approval.
-              Items will be returned to stock once approved.
+            <div style={{ background: 'var(--bg-3)', borderRadius: 10, padding: 14, marginBottom: 16 }}>
+              <div style={{ fontWeight: 600 }}>{returnTarget.item?.name}</div>
+              <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 4 }}>Assigned qty: <strong style={{ color: 'var(--text)' }}>{returnTarget.quantity}</strong></div>
             </div>
-            <div style={{ background: 'var(--bg-3)', borderRadius: 'var(--radius)', padding: '12px 16px' }}>
-              <div style={{ fontWeight: 500 }}>{returnTarget.item?.name}</div>
-              <div style={{ fontSize: 12, color: 'var(--text-2)', marginTop: 3 }}>
-                Currently assigned: <strong style={{ color: 'var(--text)' }}>{returnTarget.quantity}</strong>
-              </div>
+            <div className="form-group">
+              <label className="form-label">Quantity to Return</label>
+              <input type="number" min="1" max={returnTarget.quantity} className="form-input" value={returnForm.quantity} onChange={e => setReturnForm({ ...returnForm, quantity: parseInt(e.target.value) || 1 })} />
             </div>
-            <ReturnForm
-              quantity={returnQty}
-              notes={returnNote}
-              maxQty={returnTarget.quantity}
-              onQuantityChange={setReturnQty}
-              onNotesChange={setReturnNote}
-            />
+            <div className="form-group">
+              <label className="form-label">Notes (optional)</label>
+              <textarea className="form-input" rows={2} value={returnForm.notes} onChange={e => setReturnForm({ ...returnForm, notes: e.target.value })} placeholder="Reason for return…" />
+            </div>
           </>
         )}
       </Modal>
 
-      {/* Usage Log Viewer Modal */}
-      {showUsageLog && (
-        <UsageLogModal assignment={showUsageLog} onClose={() => setShowUsageLog(null)} />
-      )}
-    </div>
-  );
-}
-
-function UsageLogModal({ assignment, onClose }: { assignment: Assignment; onClose: () => void }) {
-  const { data: logs = [], isLoading } = useAssignmentUsage(assignment.id);
-  const usageList = logs as ItemUsage[];
-
-  return (
-    <Modal isOpen onClose={onClose} title={`Usage History — ${assignment.item?.name}`} maxWidth={560}
-      footer={<button className="btn btn-ghost" onClick={onClose}>Close</button>}>
-      {isLoading ? (
-        <div style={{ color: 'var(--text-2)', textAlign: 'center', padding: 20 }}>Loading…</div>
-      ) : usageList.length === 0 ? (
-        <div className="empty-state" style={{ padding: '24px 0' }}>
-          <Activity size={28} />
-          <span style={{ fontSize: 13 }}>No usage logged yet</span>
-        </div>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {usageList.map(log => (
-            <div key={log.id} style={{ background: 'var(--bg-3)', borderRadius: 'var(--radius)', padding: '12px 14px' }}>
-              <div className="flex items-center justify-between">
-                <div style={{ fontWeight: 600, fontSize: 13 }}>
-                  {log.quantityUsed}× used
-                  <span className="badge badge-purple" style={{ marginLeft: 8 }}>Task: {log.taskNo}</span>
-                </div>
-                <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
-                  {log.usedAt ? format(new Date(log.usedAt), 'dd MMM yyyy') : '—'}
-                </span>
-              </div>
-              <div style={{ fontSize: 12, color: 'var(--text-2)', marginTop: 4 }}>
-                Project: {log.projectName}
-                {log.notes && <span style={{ marginLeft: 8, color: 'var(--text-3)' }}>· {log.notes}</span>}
-              </div>
+      {/* Log Usage Modal */}
+      <Modal isOpen={!!usageTarget} onClose={() => setUsageTarget(null)} title={`Log Usage — ${usageTarget?.item?.name}`} size="lg"
+        footer={<>
+          <button className="btn btn-ghost" onClick={() => setUsageTarget(null)}>Cancel</button>
+          <button className="btn btn-primary" onClick={handleUsage} disabled={createUsage.isPending}>
+            {createUsage.isPending ? 'Logging…' : 'Log Usage'}
+          </button>
+        </>}>
+        {usageTarget && (
+          <>
+            <div className="form-group">
+              <label className="form-label">Date Used (optional)</label>
+              <input type="date" className="form-input" value={usageDate} onChange={e => setUsageDate(e.target.value)} />
             </div>
-          ))}
-          <div style={{ fontSize: 12, color: 'var(--text-3)', textAlign: 'right', marginTop: 4 }}>
-            Total logged: {usageList.reduce((s, l) => s + l.quantityUsed, 0)} units
-          </div>
-        </div>
-      )}
-    </Modal>
+            <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 8 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr>
+                    <th style={thStyle}>#</th>
+                    <th style={thStyle}>Item</th>
+                    <th style={{ ...thStyle, textAlign: 'center' }}>Qty Used</th>
+                    <th style={thStyle}>Task No. *</th>
+                    <th style={thStyle}>Project *</th>
+                    <th style={thStyle}></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {usageRows.map((row, idx) => (
+                    <UsageRow key={idx} row={row} index={idx} onUpdate={updateUsageRow} onRemove={removeUsageRow} />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+      </Modal>
+    </div>
   );
 }

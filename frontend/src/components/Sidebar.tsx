@@ -2,6 +2,7 @@ import { NavLink, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Package, Users, ClipboardList,
   ArrowLeftRight, LogOut, Activity, RotateCcw, ShoppingCart,
+  Tag, FolderOpen,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import ThemeToggle from './ThemeToggle';
@@ -124,6 +125,15 @@ export default function Sidebar() {
 
         {isManager && (
           <>
+            <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-3)', padding: '16px 16px 8px', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+              Catalog
+            </div>
+            <NavLink to="/categories" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+              <Tag size={16} /> Categories
+            </NavLink>
+            <NavLink to="/products" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+              <FolderOpen size={16} /> Products
+            </NavLink>
             <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-3)', padding: '16px 16px 8px', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
               Management
             </div>

@@ -1,10 +1,9 @@
 import {
-  Entity,
-  PrimaryGeneratedColumn,
-  Column,
-  CreateDateColumn,
-  UpdateDateColumn,
+  Entity, PrimaryGeneratedColumn, Column,
+  CreateDateColumn, UpdateDateColumn,
+  ManyToOne, JoinColumn,
 } from 'typeorm';
+import { Product } from '../../products/entities/product.entity';
 
 export enum ItemCondition {
   NEW = 'new',
@@ -18,6 +17,13 @@ export class InventoryItem {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
+  @Column({ nullable: true })
+  productId: string;
+
+  @ManyToOne(() => Product, { nullable: true, eager: true })
+  @JoinColumn({ name: 'productId' })
+  product: Product;
+
   @Column()
   name: string;
 
@@ -27,10 +33,10 @@ export class InventoryItem {
   @Column({ unique: true })
   sku: string;
 
-  @Column({ nullable: true})
+  @Column({ nullable: true })
   schemeNo: string;
 
-  @Column({nullable: true})
+  @Column({ nullable: true })
   projectName: string;
 
   @Column({ nullable: true })

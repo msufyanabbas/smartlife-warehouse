@@ -24,6 +24,23 @@ interface InventoryItem {
 
 interface Category { id: string; name: string; parentId?: string; parent?: { name: string }; }
 
+// Generates sequential serials from a base string.
+// "SN-001" qty 3 → ["SN-001","SN-002","SN-003"]; "A100" qty 3 → ["A100","A101","A102"];
+// "ABC" qty 3 → ["ABC-1","ABC-2","ABC-3"] (no numeric suffix found).
+const generateSequentialSerials = (base: string, qty: number): string[] => {
+  const safeQty = Math.max(0, qty | 0);
+  if (!base) return Array.from({ length: safeQty }, () => '');
+  const match = base.match(/^(.*?)(\d+)$/);
+  if (match) {
+    const prefix = match[1];
+    const numStr = match[2];
+    const startNum = parseInt(numStr, 10);
+    const padLen = numStr.length;
+    return Array.from({ length: safeQty }, (_, i) => `${prefix}${String(startNum + i).padStart(padLen, '0')}`);
+  }
+  return Array.from({ length: safeQty }, (_, i) => `${base}-${i + 1}`);
+};
+
 // ── Product autocomplete row ───────────────────────────────────────────────
 function ProductRow({ row, index, onUpdate, onRemove, usedProductIds }: {
   row: any; index: number;
@@ -103,8 +120,70 @@ function ProductRow({ row, index, onUpdate, onRemove, usedProductIds }: {
       <td style={{ ...tdStyle, width: 130 }}>
         <input className="form-input" style={{ fontSize: 12, color: 'var(--text-2)' }} value={row.category} onChange={e => onUpdate(index, 'category', e.target.value)} placeholder="Category" readOnly={!!row.productId} />
       </td>
-      <td style={{ ...tdStyle, width: 70 }}>
-        <input className="form-input" type="number" min="1" style={{ fontSize: 13, textAlign: 'center' }} value={row.quantity} onChange={e => onUpdate(index, 'quantity', parseInt(e.target.value) || 1)} />
+      <td style={{ ...tdStyle, width: 180, verticalAlign: 'top' }}>
+        <input className="form-input"
+          style={{ fontSize: 12, fontFamily: 'monospace' }}
+          value={row.serialNumber || ''}
+          onChange={e => onUpdate(index, 'serialNumber', e.target.value)}
+          placeholder={row.quantity > 1 ? 'Base e.g. SN-001' : 'Serial No.'}
+        />
+        {row.quantity > 1 && (
+          <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
+            <button type="button"
+              onClick={() => onUpdate(index, 'serialMode', 'sequential')}
+              style={{ flex: 1, fontSize: 10, padding: '3px 4px', border: '1px solid var(--border)', borderRadius: 4, cursor: 'pointer',
+                background: row.serialMode !== 'custom' ? 'var(--accent)' : 'var(--bg-3)',
+                color: row.serialMode !== 'custom' ? '#fff' : 'var(--text-2)' }}>
+              Sequential
+            </button>
+            <button type="button"
+              onClick={() => {
+                onUpdate(index, 'serialMode', 'custom');
+                const existing: string[] = Array.isArray(row.customSerials) ? row.customSerials : [];
+                const next = Array.from({ length: row.quantity }, (_, i) => existing[i] || '');
+                onUpdate(index, 'customSerials', next);
+              }}
+              style={{ flex: 1, fontSize: 10, padding: '3px 4px', border: '1px solid var(--border)', borderRadius: 4, cursor: 'pointer',
+                background: row.serialMode === 'custom' ? 'var(--accent)' : 'var(--bg-3)',
+                color: row.serialMode === 'custom' ? '#fff' : 'var(--text-2)' }}>
+              Custom
+            </button>
+          </div>
+        )}
+        {row.quantity > 1 && row.serialMode !== 'custom' && row.serialNumber && (() => {
+          const preview = generateSequentialSerials(row.serialNumber, row.quantity);
+          const shown = preview.slice(0, 3).join(', ');
+          return (
+            <div style={{ fontSize: 10, color: 'var(--text-3)', marginTop: 4, fontFamily: 'monospace', lineHeight: 1.3 }}>
+              {shown}{row.quantity > 3 ? `, … (${row.quantity})` : ''}
+            </div>
+          );
+        })()}
+        {row.quantity > 1 && row.serialMode === 'custom' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginTop: 4, maxHeight: 140, overflowY: 'auto', padding: 4, background: 'var(--bg-3)', borderRadius: 4 }}>
+            {Array.from({ length: row.quantity }, (_, i) => (
+              <input key={i} className="form-input"
+                style={{ fontSize: 11, padding: '3px 6px', fontFamily: 'monospace' }}
+                value={(row.customSerials && row.customSerials[i]) || ''}
+                onChange={e => {
+                  const next: string[] = Array.from({ length: row.quantity }, (_, j) =>
+                    j === i ? e.target.value : ((row.customSerials && row.customSerials[j]) || '')
+                  );
+                  onUpdate(index, 'customSerials', next);
+                }}
+                placeholder={`#${i + 1}`}
+              />
+            ))}
+          </div>
+        )}
+      </td>
+      <td style={{ ...tdStyle, width: 70, verticalAlign: 'top' }}>
+        <input className="form-input" type="number" min="1" style={{ fontSize: 13, textAlign: 'center' }} value={row.quantity} onChange={e => {
+          const q = parseInt(e.target.value) || 1;
+          onUpdate(index, 'quantity', q);
+          if (q === 1) onUpdate(index, 'serialMode', 'single');
+          else if (row.serialMode === 'single') onUpdate(index, 'serialMode', 'sequential');
+        }} />
       </td>
       <td style={{ ...tdStyle, width: 95 }}>
         <select className="form-input" style={{ fontSize: 12 }} value={row.condition} onChange={e => onUpdate(index, 'condition', e.target.value)}>
@@ -126,7 +205,7 @@ function ProductRow({ row, index, onUpdate, onRemove, usedProductIds }: {
   );
 }
 
-const newRow = () => ({ productId: '', productName: '', sku: '', description: '', brand: '', model: '', category: '', unit: '', quantity: 1, condition: 'new', location: '', notes: '' });
+const newRow = () => ({ productId: '', productName: '', sku: '', description: '', brand: '', model: '', category: '', unit: '', quantity: 1, condition: 'new', location: '', notes: '', serialNumber: '', serialMode: 'single', customSerials: [] as string[] });
 
 const thStyle: React.CSSProperties = { padding: '8px 10px', fontSize: 11, color: 'var(--text-3)', fontWeight: 600, textAlign: 'left', whiteSpace: 'nowrap', background: 'var(--bg-3)' };
 
@@ -220,7 +299,36 @@ export default function InventoryPage() {
     if (!schemeNo || !projectName) { alert('Scheme No. and Project Name are required'); return; }
     if (validRows.length === 0) { alert('Add at least one product row with a SKU'); return; }
     for (const row of validRows) {
-      await createItem.mutateAsync({ productId: row.productId || undefined, name: row.productName || row.sku, sku: row.sku, description: row.description || undefined, category: row.category || undefined, brand: row.brand || undefined, model: row.model || undefined, schemeNo, projectName, totalQuantity: row.quantity, condition: row.condition, location: row.location || undefined, notes: row.notes || undefined });
+      const base = {
+        productId: row.productId || undefined,
+        name: row.productName || row.sku,
+        sku: row.sku,
+        description: row.description || undefined,
+        category: row.category || undefined,
+        brand: row.brand || undefined,
+        model: row.model || undefined,
+        schemeNo,
+        projectName,
+        condition: row.condition,
+        location: row.location || undefined,
+        notes: row.notes || undefined,
+      };
+
+      if (row.quantity === 1) {
+        await createItem.mutateAsync({ ...base, totalQuantity: 1, serialNumber: row.serialNumber || undefined });
+      } else if (row.serialMode === 'custom') {
+        const custom: string[] = Array.isArray(row.customSerials) ? row.customSerials : [];
+        for (let i = 0; i < row.quantity; i++) {
+          await createItem.mutateAsync({ ...base, totalQuantity: 1, serialNumber: (custom[i] || '').trim() || undefined });
+        }
+      } else if (row.serialNumber) {
+        const serials = generateSequentialSerials(row.serialNumber, row.quantity);
+        for (const sn of serials) {
+          await createItem.mutateAsync({ ...base, totalQuantity: 1, serialNumber: sn || undefined });
+        }
+      } else {
+        await createItem.mutateAsync({ ...base, totalQuantity: row.quantity });
+      }
     }
     setShowAddScheme(false);
     refetch();
@@ -434,6 +542,7 @@ export default function InventoryPage() {
                 <th style={thStyle}>Product Name</th>
                 <th style={thStyle}>SKU</th>
                 <th style={thStyle}>Category</th>
+                <th style={thStyle}>Serial No.</th>
                 <th style={{ ...thStyle, textAlign: 'center' }}>Qty</th>
                 <th style={thStyle}>Condition</th>
                 <th style={thStyle}>Location</th>

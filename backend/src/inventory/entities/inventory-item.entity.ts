@@ -30,7 +30,7 @@ export class InventoryItem {
   @Column({ nullable: true })
   description: string;
 
-  @Column({ unique: true })
+  @Column()
   sku: string;
 
   @Column({ nullable: true })

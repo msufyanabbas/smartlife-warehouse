@@ -17,6 +17,7 @@ interface Product {
 
 interface InventoryItem {
   id: string; name: string; sku: string; schemeNo: string; projectName: string;
+  purchaseOrder?: string;
   description?: string; category?: string; brand?: string; model?: string;
   serialNumber?: string;
   totalQuantity: number; availableQuantity: number; assignedQuantity: number;
@@ -45,12 +46,104 @@ const generateSequentialSerials = (base: string, qty: number): string[] => {
   return Array.from({ length: safeQty }, (_, i) => `${base}-${i + 1}`);
 };
 
+// ── Category autocomplete ──────────────────────────────────────────────────
+function CategoryAutocomplete({ value, onChange, categories, readOnly }: {
+  value: string;
+  onChange: (val: string) => void;
+  categories: string[];
+  readOnly?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  const filtered = categories.filter(c =>
+    c.toLowerCase().includes(value.toLowerCase())
+  );
+
+  // Position the fixed dropdown under the input
+  const positionDropdown = () => {
+    if (!inputRef.current || !dropdownRef.current) return;
+    const rect = inputRef.current.getBoundingClientRect();
+    const el = dropdownRef.current;
+    el.style.top = `${rect.bottom + 4}px`;
+    el.style.left = `${rect.left}px`;
+    el.style.width = `${Math.max(rect.width, 220)}px`;
+    // Clamp to viewport right edge
+    const rightEdge = rect.left + el.offsetWidth;
+    if (rightEdge > window.innerWidth - 8) {
+      el.style.left = `${window.innerWidth - el.offsetWidth - 8}px`;
+    }
+  };
+
+  useEffect(() => {
+    if (open) positionDropdown();
+  }, [open, filtered.length]);
+
+  useEffect(() => {
+    const h = (e: MouseEvent) => {
+      if (
+        inputRef.current && !inputRef.current.contains(e.target as Node) &&
+        dropdownRef.current && !dropdownRef.current.contains(e.target as Node)
+      ) setOpen(false);
+    };
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, []);
+
+  return (
+    <div style={{ position: 'relative' }}>
+      <input
+        ref={inputRef}
+        className="form-input"
+        style={{ fontSize: 12, color: 'var(--text-2)' }}
+        value={value}
+        onChange={e => { onChange(e.target.value); setOpen(true); }}
+        onFocus={() => { if (!readOnly) setOpen(true); }}
+        placeholder="Search category…"
+        readOnly={readOnly}
+      />
+      {open && !readOnly && filtered.length > 0 && (
+        <div
+          ref={el => {
+            (dropdownRef as any).current = el;
+            if (el) positionDropdown();
+          }}
+          style={{
+            position: 'fixed',
+            zIndex: 9999,
+            background: 'var(--bg-2)',
+            border: '1px solid var(--border)',
+            borderRadius: 10,
+            boxShadow: '0 12px 40px rgba(0,0,0,0.45)',
+            maxHeight: 240,
+            overflowY: 'auto',
+          }}
+        >
+          {filtered.map(cat => (
+            <div
+              key={cat}
+              onMouseDown={() => { onChange(cat); setOpen(false); }}
+              style={{ padding: '10px 14px', cursor: 'pointer', fontSize: 13, borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}
+              onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent-dim)')}
+              onMouseLeave={e => (e.currentTarget.style.background = '')}
+            >
+              {cat}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Product autocomplete row ───────────────────────────────────────────────
-function ProductRow({ row, index, onUpdate, onRemove, usedProductIds }: {
+function ProductRow({ row, index, onUpdate, onRemove, usedProductIds, allCategories }: {
   row: any; index: number;
   onUpdate: (i: number, f: string, v: any) => void;
   onRemove: (i: number) => void;
   usedProductIds: string[];
+  allCategories: string[];
 }) {
   const [query, setQuery] = useState(row.productName || '');
   const [open, setOpen] = useState(false);
@@ -84,7 +177,7 @@ function ProductRow({ row, index, onUpdate, onRemove, usedProductIds }: {
     return () => document.removeEventListener('mousedown', h);
   }, []);
 
-  const td = { padding: '4px 6px' };
+  const td = { padding: '6px 6px' };
 
   return (
     <tr style={{ borderBottom: '1px solid var(--border)' }}>
@@ -92,7 +185,7 @@ function ProductRow({ row, index, onUpdate, onRemove, usedProductIds }: {
       <td style={{ ...td, width: 28, textAlign: 'center', color: 'var(--text-3)', fontSize: 12 }}>{index + 1}</td>
 
       {/* Product autocomplete */}
-      <td style={{ ...td, minWidth: 200 }}>
+      <td style={{ ...td, minWidth: 220 }}>
         <div ref={ref} style={{ position: 'relative' }}>
           <div style={{ position: 'relative' }}>
             <input className="form-input"
@@ -116,14 +209,47 @@ function ProductRow({ row, index, onUpdate, onRemove, usedProductIds }: {
             )}
           </div>
           {open && filtered.length > 0 && (
-            <div style={{ position: 'absolute', top: 'calc(100% + 2px)', left: 0, right: 0, zIndex: 999, background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 10, boxShadow: '0 8px 32px rgba(0,0,0,0.35)', overflow: 'hidden' }}>
+            <div style={{
+              position: 'fixed',
+              zIndex: 9999,
+              background: 'var(--bg-2)',
+              border: '1px solid var(--border)',
+              borderRadius: 10,
+              boxShadow: '0 12px 40px rgba(0,0,0,0.45)',
+              maxHeight: 260,
+              overflowY: 'auto',
+              minWidth: 280,
+              width: 'max-content',
+              // position is set via JS below; use the ref for anchoring
+            }}
+              ref={el => {
+                if (el && ref.current) {
+                  const inputEl = ref.current.querySelector('input');
+                  if (inputEl) {
+                    const rect = inputEl.getBoundingClientRect();
+                    el.style.top = `${rect.bottom + 4}px`;
+                    el.style.left = `${rect.left}px`;
+                    // Clamp to viewport
+                    const rightEdge = rect.left + el.offsetWidth;
+                    if (rightEdge > window.innerWidth - 8) {
+                      el.style.left = `${window.innerWidth - el.offsetWidth - 8}px`;
+                    }
+                  }
+                }
+              }}
+            >
               {filtered.map(p => (
                 <div key={p.id} onMouseDown={() => select(p)}
-                  style={{ padding: '9px 14px', cursor: 'pointer', borderBottom: '1px solid var(--border)' }}
+                  style={{
+                    padding: '10px 16px',
+                    cursor: 'pointer',
+                    borderBottom: '1px solid var(--border)',
+                    minHeight: 48,
+                  }}
                   onMouseEnter={e => (e.currentTarget.style.background = 'var(--accent-dim)')}
                   onMouseLeave={e => (e.currentTarget.style.background = '')}>
-                  <div style={{ fontWeight: 500, fontSize: 13 }}>{p.name}</div>
-                  <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 1 }}>
+                  <div style={{ fontWeight: 500, fontSize: 13, whiteSpace: 'nowrap' }}>{p.name}</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2, whiteSpace: 'nowrap' }}>
                     {p.sku}{p.category ? ` · ${p.category.parent ? p.category.parent.name + ' › ' : ''}${p.category.name}` : ''}
                   </div>
                 </div>
@@ -131,7 +257,28 @@ function ProductRow({ row, index, onUpdate, onRemove, usedProductIds }: {
             </div>
           )}
           {open && query.length >= 1 && filtered.length === 0 && (
-            <div style={{ position: 'absolute', top: 'calc(100% + 2px)', left: 0, right: 0, zIndex: 999, background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 14px', fontSize: 12, color: 'var(--text-3)' }}>
+            <div style={{
+              position: 'fixed',
+              zIndex: 9999,
+              background: 'var(--bg-2)',
+              border: '1px solid var(--border)',
+              borderRadius: 10,
+              padding: '10px 14px',
+              fontSize: 12,
+              color: 'var(--text-3)',
+              minWidth: 240,
+            }}
+              ref={el => {
+                if (el && ref.current) {
+                  const inputEl = ref.current.querySelector('input');
+                  if (inputEl) {
+                    const rect = inputEl.getBoundingClientRect();
+                    el.style.top = `${rect.bottom + 4}px`;
+                    el.style.left = `${rect.left}px`;
+                  }
+                }
+              }}
+            >
               No products found — <a href="/products" style={{ color: 'var(--accent)' }}>Add to catalog →</a>
             </div>
           )}
@@ -149,13 +296,12 @@ function ProductRow({ row, index, onUpdate, onRemove, usedProductIds }: {
         />
       </td>
 
-      {/* Category */}
-      <td style={{ ...td, width: 120 }}>
-        <input className="form-input"
-          style={{ fontSize: 12, color: 'var(--text-2)' }}
+      {/* Category — searchable autocomplete */}
+      <td style={{ ...td, width: 140 }}>
+        <CategoryAutocomplete
           value={row.category}
-          onChange={e => onUpdate(index, 'category', e.target.value)}
-          placeholder="Category"
+          onChange={v => onUpdate(index, 'category', v)}
+          categories={allCategories}
           readOnly={!!row.productId}
         />
       </td>
@@ -292,15 +438,23 @@ export default function InventoryPage() {
   const [stockTarget, setStockTarget] = useState<InventoryItem | null>(null);
   const [stockQty, setStockQty] = useState('1');
   const [stockDate, setStockDate] = useState('');
+  const [stockSchemeNo, setStockSchemeNo] = useState('');
   const [expandedSchemes, setExpandedSchemes] = useState<Set<string>>(new Set());
 
   // ── Add scheme form ───────────────────────────────────────────────────────
   const [schemeNo, setSchemeNo] = useState('');
   const [projectName, setProjectName] = useState('');
+  const [purchaseOrder, setPurchaseOrder] = useState('');
   const [rows, setRows] = useState([newRow()]);
 
   const list = items as InventoryItem[];
   const cats = categories as Category[];
+
+  // Flat list of all category display names for autocomplete
+  const allCategoryNames = useMemo(() =>
+    cats.map(c => c.parent ? `${c.parent.name} › ${c.name}` : c.name).sort(),
+    [cats]
+  );
 
   const schemeOptions = useMemo(() => [...new Set(list.map(i => i.schemeNo).filter(Boolean))].sort(), [list]);
   const categoryOptions = useMemo(() => [...new Set(list.map(i => i.category).filter(Boolean))].sort(), [list]);
@@ -309,7 +463,7 @@ export default function InventoryPage() {
     const q = search.toLowerCase();
     const matchSearch = !q || i.name.toLowerCase().includes(q) || i.sku.toLowerCase().includes(q) ||
       i.schemeNo?.toLowerCase().includes(q) || i.projectName?.toLowerCase().includes(q) ||
-      i.serialNumber?.toLowerCase().includes(q);
+      i.serialNumber?.toLowerCase().includes(q) || i.purchaseOrder?.toLowerCase().includes(q);
     const matchScheme = !schemeFilter || i.schemeNo === schemeFilter;
     const matchCat = !categoryFilter || i.category === categoryFilter;
     const matchCond = !conditionFilter || i.condition === conditionFilter;
@@ -326,7 +480,7 @@ export default function InventoryPage() {
   const grouped = useMemo(() => {
     const map = new Map<string, InventoryItem[]>();
     filtered.forEach(item => {
-      const key = `${item.sku || '—'}||${item.schemeNo || '—'}`;
+      const key = `${item.schemeNo || '—'}||${item.projectName || '—'}`;
       if (!map.has(key)) map.set(key, []);
       map.get(key)!.push(item);
     });
@@ -376,6 +530,7 @@ export default function InventoryPage() {
         model: row.model || undefined,
         schemeNo,
         projectName,
+        purchaseOrder: purchaseOrder || undefined,
         condition: row.condition,
         location: row.location || undefined,
         notes: row.notes || undefined,
@@ -399,6 +554,7 @@ export default function InventoryPage() {
     }
     setShowAddScheme(false);
     setRows([newRow()]);
+    setPurchaseOrder('');
     refetch();
   };
 
@@ -410,6 +566,7 @@ export default function InventoryPage() {
       'Serial No.': i.serialNumber || '',
       'Scheme No.': i.schemeNo || '',
       'Project': i.projectName || '',
+      'Purchase Order': i.purchaseOrder || '',
       'Category': i.category || '',
       'Brand': i.brand || '',
       'Condition': i.condition,
@@ -451,7 +608,7 @@ export default function InventoryPage() {
           </button>
           {isManager && (
             <button className="btn btn-primary" onClick={() => {
-              setSchemeNo(''); setProjectName(''); setRows([newRow()]); setShowAddScheme(true);
+              setSchemeNo(''); setProjectName(''); setPurchaseOrder(''); setRows([newRow()]); setShowAddScheme(true);
             }}>
               <Plus size={15} /> Add Inventory
             </button>
@@ -464,7 +621,7 @@ export default function InventoryPage() {
         <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr', gap: 10, marginBottom: 10 }}>
           <div className="search-bar">
             <Search size={14} />
-            <input placeholder="Search name, SKU, serial, scheme…" value={search} onChange={e => setSearch(e.target.value)} />
+            <input placeholder="Search name, SKU, serial, scheme, PO…" value={search} onChange={e => setSearch(e.target.value)} />
           </div>
           <select className="form-input" value={schemeFilter} onChange={e => setSchemeFilter(e.target.value)}>
             <option value="">All Schemes</option>
@@ -555,6 +712,12 @@ export default function InventoryPage() {
                   <div style={{ flex: 1 }}>
                     <span style={{ fontWeight: 700, fontSize: 15 }}>{sNo}</span>
                     <span style={{ fontSize: 12, color: 'var(--text-3)', marginLeft: 10 }}>{pName}</span>
+                    {/* Show PO on any item in group that has one */}
+                    {groupItems[0]?.purchaseOrder && (
+                      <span style={{ fontSize: 11, color: 'var(--text-3)', marginLeft: 10 }}>
+                        PO: <code style={{ color: 'var(--accent)', fontSize: 11 }}>{groupItems[0].purchaseOrder}</code>
+                      </span>
+                    )}
                   </div>
                   <span className="badge badge-blue">{groupItems.length} item{groupItems.length !== 1 ? 's' : ''}</span>
                   <span style={{ fontSize: 13, fontWeight: 700, color: stockColor }}>{availQty}/{totalQty}</span>
@@ -571,6 +734,7 @@ export default function InventoryPage() {
                           <th>SKU</th>
                           <th>Serial No.</th>
                           <th>Category</th>
+                          <th>PO</th>
                           <th style={{ textAlign: 'center' }}>Total</th>
                           <th style={{ textAlign: 'center' }}>Avail.</th>
                           <th style={{ textAlign: 'center' }}>Assigned</th>
@@ -602,6 +766,11 @@ export default function InventoryPage() {
                                 {item.serialNumber || '—'}
                               </td>
                               <td style={{ fontSize: 12, color: 'var(--text-2)' }}>{item.category || '—'}</td>
+                              <td style={{ fontSize: 12, color: 'var(--text-2)', fontFamily: 'monospace' }}>
+                                {item.purchaseOrder ? (
+                                  <code style={{ fontSize: 11, background: 'var(--bg-3)', padding: '2px 6px', borderRadius: 4, color: 'var(--text-2)' }}>{item.purchaseOrder}</code>
+                                ) : '—'}
+                              </td>
                               <td style={{ textAlign: 'center', fontWeight: 600 }}>{item.totalQuantity}</td>
                               <td style={{ textAlign: 'center', fontWeight: 700, color: ac }}>{item.availableQuantity}</td>
                               <td style={{ textAlign: 'center', color: 'var(--yellow)' }}>{item.assignedQuantity}</td>
@@ -618,7 +787,7 @@ export default function InventoryPage() {
                               {isManager && (
                                 <td>
                                   <div className="flex gap-2">
-                                    <button className="btn btn-ghost btn-sm" onClick={() => { setStockTarget(item); setStockQty('1'); setStockDate(''); }}>
+                                    <button className="btn btn-ghost btn-sm" onClick={() => { setStockTarget(item); setStockQty('1'); setStockDate(''); setStockSchemeNo(item.schemeNo || ''); }}>
                                       + Stock
                                     </button>
                                     {user?.role === 'admin' && (
@@ -651,16 +820,23 @@ export default function InventoryPage() {
             {createItem.isPending ? 'Saving…' : `Add ${rows.filter(r => r.sku).length || 0} Item(s)`}
           </button>
         </>}>
-        <div style={{ display: 'flex', gap: 16, marginBottom: 20 }}>
-          <div className="form-group" style={{ flex: 1, marginBottom: 0 }}>
+
+        {/* Scheme header fields */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16, marginBottom: 20 }}>
+          <div className="form-group" style={{ marginBottom: 0 }}>
             <label className="form-label">Scheme No. *</label>
             <input className="form-input" value={schemeNo} onChange={e => setSchemeNo(e.target.value)} placeholder="e.g. SCH-2024-001" autoFocus />
           </div>
-          <div className="form-group" style={{ flex: 1, marginBottom: 0 }}>
+          <div className="form-group" style={{ marginBottom: 0 }}>
             <label className="form-label">Project Name *</label>
             <input className="form-input" value={projectName} onChange={e => setProjectName(e.target.value)} placeholder="e.g. Riyadh Metro Phase 2" />
           </div>
+          <div className="form-group" style={{ marginBottom: 0 }}>
+            <label className="form-label">Purchase Order</label>
+            <input className="form-input" value={purchaseOrder} onChange={e => setPurchaseOrder(e.target.value)} placeholder="e.g. PO-2024-0042" />
+          </div>
         </div>
+
         <div style={{ fontSize: 12, color: 'var(--accent)', background: 'var(--accent-dim)', borderRadius: 8, padding: '8px 12px', marginBottom: 12 }}>
           💡 Type a product name to search from your catalog. SKU and category fill automatically.
         </div>
@@ -682,7 +858,15 @@ export default function InventoryPage() {
             </thead>
             <tbody>
               {rows.map((row, idx) => (
-                <ProductRow key={idx} row={row} index={idx} onUpdate={updateRow} onRemove={removeRow} usedProductIds={usedProductIds} />
+                <ProductRow
+                  key={idx}
+                  row={row}
+                  index={idx}
+                  onUpdate={updateRow}
+                  onRemove={removeRow}
+                  usedProductIds={usedProductIds}
+                  allCategories={allCategoryNames}
+                />
               ))}
             </tbody>
           </table>
@@ -694,10 +878,10 @@ export default function InventoryPage() {
       </Modal>
 
       {/* ── Add Stock Modal ── */}
-      <Modal isOpen={!!stockTarget} onClose={() => { setStockTarget(null); setStockDate(''); }}
+      <Modal isOpen={!!stockTarget} onClose={() => { setStockTarget(null); setStockDate(''); setStockSchemeNo(''); }}
         title={`Add Stock — ${stockTarget?.name}`}
         footer={<>
-          <button className="btn btn-ghost" onClick={() => { setStockTarget(null); setStockDate(''); }}>Cancel</button>
+          <button className="btn btn-ghost" onClick={() => { setStockTarget(null); setStockDate(''); setStockSchemeNo(''); }}>Cancel</button>
           <button className="btn btn-primary"
             onClick={async () => {
               if (!stockTarget) return;
@@ -705,9 +889,13 @@ export default function InventoryPage() {
                 id: stockTarget.id,
                 quantity: parseInt(stockQty),
                 receivedAt: stockDate || undefined,
+                schemeNo: (stockSchemeNo.trim() && stockSchemeNo.trim() !== stockTarget.schemeNo)
+  ? stockSchemeNo.trim()
+  : undefined,
               });
               setStockTarget(null);
               setStockDate('');
+              setStockSchemeNo('');
             }}
             disabled={addStock.isPending}>
             {addStock.isPending ? 'Adding…' : 'Add Stock'}
@@ -720,6 +908,7 @@ export default function InventoryPage() {
               <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 4 }}>
                 SKU: {stockTarget.sku}
                 {stockTarget.serialNumber && <span> · Serial: <code style={{ color: 'var(--accent)' }}>{stockTarget.serialNumber}</code></span>}
+                {stockTarget.purchaseOrder && <span> · PO: <code style={{ color: 'var(--text-2)' }}>{stockTarget.purchaseOrder}</code></span>}
                 {' · '}Current: <strong style={{ color: 'var(--text)' }}>{stockTarget.totalQuantity}</strong> total
                 {' · '}<strong style={{ color: 'var(--green)' }}>{stockTarget.availableQuantity}</strong> available
               </div>
@@ -737,6 +926,21 @@ export default function InventoryPage() {
                 onChange={e => setStockQty(e.target.value)}
                 autoFocus
               />
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Scheme No.</label>
+              <input className="form-input"
+                value={stockSchemeNo}
+                onChange={e => setStockSchemeNo(e.target.value)}
+                placeholder={stockTarget?.schemeNo || 'e.g. SCH-2024-001'}
+              />
+              <p style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 4 }}>
+                {stockSchemeNo.trim() && stockSchemeNo.trim() !== stockTarget?.schemeNo
+                  ? <span style={{ color: 'var(--accent)' }}>⚡ Will create a new entry under scheme <strong>{stockSchemeNo.trim()}</strong></span>
+                  : <>Leave blank to keep existing scheme <code style={{ color: 'var(--accent)' }}>{stockTarget?.schemeNo}</code></>
+                }
+              </p>
             </div>
 
             <div className="form-group">

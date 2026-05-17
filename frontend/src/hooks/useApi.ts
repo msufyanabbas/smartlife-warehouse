@@ -37,8 +37,8 @@ export const useUpdateItem = () => {
 export const useAddStock = () => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, quantity, receivedAt }: { id: string; quantity: number; receivedAt?: string }) =>
-      api.patch(`/inventory/${id}/stock`, { quantity, receivedAt }).then(r => r.data.data),
+    mutationFn: ({ id, quantity, receivedAt, schemeNo }: { id: string; quantity: number; receivedAt?: string; schemeNo: string }) =>
+      api.patch(`/inventory/${id}/stock`, { quantity, receivedAt, schemeNo }).then(r => r.data.data),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['inventory'] }); qc.invalidateQueries({ queryKey: ['inventory-stats'] }); toast.success('Stock updated'); },
     onError: (e: any) => toast.error(e.response?.data?.message || 'Failed'),
   });

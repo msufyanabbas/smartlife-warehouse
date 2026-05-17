@@ -84,14 +84,32 @@ export class InventoryService {
     return this.itemRepository.save(item);
   }
 
-  async addStock(id: string, dto: AddStockDto) {
-    const item = await this.findOne(id);
-    item.totalQuantity += dto.quantity;
-    item.availableQuantity += dto.quantity;
-    if (dto.receivedAt) item.receivedAt = dto.receivedAt;
-    if (dto.schemeNo) item.schemeNo = dto.schemeNo;
-    return this.itemRepository.save(item);
+async addStock(id: string, dto: AddStockDto) {
+  const item = await this.findOne(id);
+  const targetScheme = dto.schemeNo?.trim();
+  const isDifferentScheme = targetScheme && targetScheme !== item.schemeNo;
+
+  if (isDifferentScheme) {
+    // Destructure out id and TypeORM metadata so save() does an INSERT
+    const { id: _id, createdAt, updatedAt, ...fields } = item as any;
+    const newItem = this.itemRepository.create({
+      ...fields,
+      schemeNo: targetScheme,
+      totalQuantity: dto.quantity,
+      availableQuantity: dto.quantity,
+      assignedQuantity: 0,
+      usedQuantity: 0,
+      receivedAt: dto.receivedAt ?? new Date(),
+    });
+    return this.itemRepository.save(newItem);
   }
+
+  // Same scheme — increment existing record only
+  item.totalQuantity += dto.quantity;
+  item.availableQuantity += dto.quantity;
+  if (dto.receivedAt) item.receivedAt = dto.receivedAt;
+  return this.itemRepository.save(item);
+}
 
   async remove(id: string) {
     const item = await this.findOne(id);

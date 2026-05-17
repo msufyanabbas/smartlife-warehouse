@@ -22,9 +22,16 @@ export class CreateInventoryItemDto {
   @IsString()
   description?: string;
 
+  @IsOptional()
+@IsString()
+purchaseOrder?: string;
+
   @IsString()
   @IsNotEmpty()
   sku: string;
+
+  @IsOptional()
+  receivedAt?: Date;
 
     @IsOptional()
   @IsString()
@@ -122,6 +129,13 @@ export class AddStockDto {
   @IsOptional()
   @IsString()
   notes?: string;
+
+  @IsOptional()
+@IsString()
+schemeNo?: string;
+
+  @IsOptional()
+receivedAt?: Date;
 }
 
 export class BulkCreateInventoryDto {

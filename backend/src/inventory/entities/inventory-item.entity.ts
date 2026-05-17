@@ -78,6 +78,12 @@ export class InventoryItem {
   @Column({ default: true })
   isActive: boolean;
 
+  @Column({ nullable: true })
+purchaseOrder: string;
+
+  @Column({ nullable: true, type: 'timestamp' })
+  receivedAt: Date;
+
   @CreateDateColumn()
   createdAt: Date;
 

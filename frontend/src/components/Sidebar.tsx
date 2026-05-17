@@ -3,6 +3,7 @@ import {
   LayoutDashboard, Package, Users, ClipboardList,
   ArrowLeftRight, LogOut, Activity, RotateCcw, ShoppingCart,
   Tag, FolderOpen,
+  BarChart,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import ThemeToggle from './ThemeToggle';
@@ -98,6 +99,9 @@ export default function Sidebar() {
         </NavLink>
         <NavLink to="/inventory" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
           <Package size={16} /> Inventory
+        </NavLink>
+         <NavLink to="/stock-report" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+          <BarChart size={16} /> Stock Report
         </NavLink>
         <NavLink to="/assignments" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
           <ClipboardList size={16} /> Assignments

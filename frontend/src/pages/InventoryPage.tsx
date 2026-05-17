@@ -1,9 +1,10 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import * as XLSX from 'xlsx';
 import { Plus, Search, Trash2, Package, ChevronDown, CheckCircle, Download, Filter } from 'lucide-react';
+import { format } from 'date-fns';
 import {
   useInventory, useCreateItem, useAddStock, useDeleteItem,
-  useProductSearch, useProducts, useCategoriesFlat,
+  useProductSearch, useCategoriesFlat,
 } from '../hooks/useApi';
 import { useAuth } from '../contexts/AuthContext';
 import Modal from '../components/Modal';
@@ -17,16 +18,17 @@ interface Product {
 interface InventoryItem {
   id: string; name: string; sku: string; schemeNo: string; projectName: string;
   description?: string; category?: string; brand?: string; model?: string;
+  serialNumber?: string;
   totalQuantity: number; availableQuantity: number; assignedQuantity: number;
   usedQuantity: number; condition: string; location?: string; notes?: string;
   productId?: string; isActive: boolean;
+  receivedAt?: string;
+  createdAt: string;
 }
 
 interface Category { id: string; name: string; parentId?: string; parent?: { name: string }; }
 
 // Generates sequential serials from a base string.
-// "SN-001" qty 3 → ["SN-001","SN-002","SN-003"]; "A100" qty 3 → ["A100","A101","A102"];
-// "ABC" qty 3 → ["ABC-1","ABC-2","ABC-3"] (no numeric suffix found).
 const generateSequentialSerials = (base: string, qty: number): string[] => {
   const safeQty = Math.max(0, qty | 0);
   if (!base) return Array.from({ length: safeQty }, () => '');
@@ -36,7 +38,9 @@ const generateSequentialSerials = (base: string, qty: number): string[] => {
     const numStr = match[2];
     const startNum = parseInt(numStr, 10);
     const padLen = numStr.length;
-    return Array.from({ length: safeQty }, (_, i) => `${prefix}${String(startNum + i).padStart(padLen, '0')}`);
+    return Array.from({ length: safeQty }, (_, i) =>
+      `${prefix}${String(startNum + i).padStart(padLen, '0')}`
+    );
   }
   return Array.from({ length: safeQty }, (_, i) => `${base}-${i + 1}`);
 };
@@ -65,32 +69,51 @@ function ProductRow({ row, index, onUpdate, onRemove, usedProductIds }: {
     onUpdate(index, 'description', p.description || '');
     onUpdate(index, 'brand', p.brand || '');
     onUpdate(index, 'model', p.model || '');
-    const cat = p.category?.parent ? `${p.category.parent.name} › ${p.category.name}` : p.category?.name || '';
+    const cat = p.category?.parent
+      ? `${p.category.parent.name} › ${p.category.name}`
+      : p.category?.name || '';
     onUpdate(index, 'category', cat);
     onUpdate(index, 'unit', p.unit || '');
   };
 
   useEffect(() => {
-    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    const h = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
     document.addEventListener('mousedown', h);
     return () => document.removeEventListener('mousedown', h);
   }, []);
 
-  const tdStyle = { padding: '4px 6px' };
+  const td = { padding: '4px 6px' };
 
   return (
     <tr style={{ borderBottom: '1px solid var(--border)' }}>
-      <td style={{ ...tdStyle, width: 28, textAlign: 'center', color: 'var(--text-3)', fontSize: 12 }}>{index + 1}</td>
-      <td style={{ ...tdStyle, minWidth: 200 }}>
+      {/* # */}
+      <td style={{ ...td, width: 28, textAlign: 'center', color: 'var(--text-3)', fontSize: 12 }}>{index + 1}</td>
+
+      {/* Product autocomplete */}
+      <td style={{ ...td, minWidth: 200 }}>
         <div ref={ref} style={{ position: 'relative' }}>
           <div style={{ position: 'relative' }}>
-            <input className="form-input" style={{ paddingRight: row.productId ? 28 : 10, fontSize: 13 }}
+            <input className="form-input"
+              style={{ paddingRight: row.productId ? 28 : 10, fontSize: 13 }}
               value={query}
-              onChange={e => { setQuery(e.target.value); if (!e.target.value) { onUpdate(index, 'productId', ''); onUpdate(index, 'productName', ''); onUpdate(index, 'sku', ''); onUpdate(index, 'category', ''); } setOpen(true); }}
+              onChange={e => {
+                setQuery(e.target.value);
+                if (!e.target.value) {
+                  onUpdate(index, 'productId', '');
+                  onUpdate(index, 'productName', '');
+                  onUpdate(index, 'sku', '');
+                  onUpdate(index, 'category', '');
+                }
+                setOpen(true);
+              }}
               onFocus={() => query && setOpen(true)}
               placeholder="Type to search product…"
             />
-            {row.productId && <CheckCircle size={13} style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', color: 'var(--green)' }} />}
+            {row.productId && (
+              <CheckCircle size={13} style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', color: 'var(--green)' }} />
+            )}
           </div>
           {open && filtered.length > 0 && (
             <div style={{ position: 'absolute', top: 'calc(100% + 2px)', left: 0, right: 0, zIndex: 999, background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 10, boxShadow: '0 8px 32px rgba(0,0,0,0.35)', overflow: 'hidden' }}>
@@ -114,13 +137,31 @@ function ProductRow({ row, index, onUpdate, onRemove, usedProductIds }: {
           )}
         </div>
       </td>
-      <td style={{ ...tdStyle, width: 100 }}>
-        <input className="form-input" style={{ fontSize: 12, fontFamily: 'monospace', color: 'var(--accent)' }} value={row.sku} onChange={e => onUpdate(index, 'sku', e.target.value)} placeholder="SKU" readOnly={!!row.productId} />
+
+      {/* SKU */}
+      <td style={{ ...td, width: 100 }}>
+        <input className="form-input"
+          style={{ fontSize: 12, fontFamily: 'monospace', color: 'var(--accent)' }}
+          value={row.sku}
+          onChange={e => onUpdate(index, 'sku', e.target.value)}
+          placeholder="SKU"
+          readOnly={!!row.productId}
+        />
       </td>
-      <td style={{ ...tdStyle, width: 130 }}>
-        <input className="form-input" style={{ fontSize: 12, color: 'var(--text-2)' }} value={row.category} onChange={e => onUpdate(index, 'category', e.target.value)} placeholder="Category" readOnly={!!row.productId} />
+
+      {/* Category */}
+      <td style={{ ...td, width: 120 }}>
+        <input className="form-input"
+          style={{ fontSize: 12, color: 'var(--text-2)' }}
+          value={row.category}
+          onChange={e => onUpdate(index, 'category', e.target.value)}
+          placeholder="Category"
+          readOnly={!!row.productId}
+        />
       </td>
-      <td style={{ ...tdStyle, width: 180, verticalAlign: 'top' }}>
+
+      {/* Serial Number */}
+      <td style={{ ...td, width: 180, verticalAlign: 'top' }}>
         <input className="form-input"
           style={{ fontSize: 12, fontFamily: 'monospace' }}
           value={row.serialNumber || ''}
@@ -131,31 +172,25 @@ function ProductRow({ row, index, onUpdate, onRemove, usedProductIds }: {
           <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
             <button type="button"
               onClick={() => onUpdate(index, 'serialMode', 'sequential')}
-              style={{ flex: 1, fontSize: 10, padding: '3px 4px', border: '1px solid var(--border)', borderRadius: 4, cursor: 'pointer',
-                background: row.serialMode !== 'custom' ? 'var(--accent)' : 'var(--bg-3)',
-                color: row.serialMode !== 'custom' ? '#fff' : 'var(--text-2)' }}>
+              style={{ flex: 1, fontSize: 10, padding: '3px 4px', border: '1px solid var(--border)', borderRadius: 4, cursor: 'pointer', background: row.serialMode !== 'custom' ? 'var(--accent)' : 'var(--bg-3)', color: row.serialMode !== 'custom' ? '#fff' : 'var(--text-2)' }}>
               Sequential
             </button>
             <button type="button"
               onClick={() => {
                 onUpdate(index, 'serialMode', 'custom');
                 const existing: string[] = Array.isArray(row.customSerials) ? row.customSerials : [];
-                const next = Array.from({ length: row.quantity }, (_, i) => existing[i] || '');
-                onUpdate(index, 'customSerials', next);
+                onUpdate(index, 'customSerials', Array.from({ length: row.quantity }, (_, i) => existing[i] || ''));
               }}
-              style={{ flex: 1, fontSize: 10, padding: '3px 4px', border: '1px solid var(--border)', borderRadius: 4, cursor: 'pointer',
-                background: row.serialMode === 'custom' ? 'var(--accent)' : 'var(--bg-3)',
-                color: row.serialMode === 'custom' ? '#fff' : 'var(--text-2)' }}>
+              style={{ flex: 1, fontSize: 10, padding: '3px 4px', border: '1px solid var(--border)', borderRadius: 4, cursor: 'pointer', background: row.serialMode === 'custom' ? 'var(--accent)' : 'var(--bg-3)', color: row.serialMode === 'custom' ? '#fff' : 'var(--text-2)' }}>
               Custom
             </button>
           </div>
         )}
         {row.quantity > 1 && row.serialMode !== 'custom' && row.serialNumber && (() => {
           const preview = generateSequentialSerials(row.serialNumber, row.quantity);
-          const shown = preview.slice(0, 3).join(', ');
           return (
             <div style={{ fontSize: 10, color: 'var(--text-3)', marginTop: 4, fontFamily: 'monospace', lineHeight: 1.3 }}>
-              {shown}{row.quantity > 3 ? `, … (${row.quantity})` : ''}
+              {preview.slice(0, 3).join(', ')}{row.quantity > 3 ? `, … (${row.quantity})` : ''}
             </div>
           );
         })()}
@@ -177,26 +212,42 @@ function ProductRow({ row, index, onUpdate, onRemove, usedProductIds }: {
           </div>
         )}
       </td>
-      <td style={{ ...tdStyle, width: 70, verticalAlign: 'top' }}>
-        <input className="form-input" type="number" min="1" style={{ fontSize: 13, textAlign: 'center' }} value={row.quantity} onChange={e => {
-          const q = parseInt(e.target.value) || 1;
-          onUpdate(index, 'quantity', q);
-          if (q === 1) onUpdate(index, 'serialMode', 'single');
-          else if (row.serialMode === 'single') onUpdate(index, 'serialMode', 'sequential');
-        }} />
+
+      {/* Qty */}
+      <td style={{ ...td, width: 70, verticalAlign: 'top' }}>
+        <input className="form-input" type="number" min="1"
+          style={{ fontSize: 13, textAlign: 'center' }}
+          value={row.quantity}
+          onChange={e => {
+            const q = parseInt(e.target.value) || 1;
+            onUpdate(index, 'quantity', q);
+            if (q === 1) onUpdate(index, 'serialMode', 'single');
+            else if (row.serialMode === 'single') onUpdate(index, 'serialMode', 'sequential');
+          }}
+        />
       </td>
-      <td style={{ ...tdStyle, width: 95 }}>
+
+      {/* Condition */}
+      <td style={{ ...td, width: 90 }}>
         <select className="form-input" style={{ fontSize: 12 }} value={row.condition} onChange={e => onUpdate(index, 'condition', e.target.value)}>
-          {['new', 'good', 'fair', 'poor'].map(c => <option key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</option>)}
+          {['new', 'good', 'fair', 'poor'].map(c => (
+            <option key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</option>
+          ))}
         </select>
       </td>
-      <td style={{ ...tdStyle, width: 90 }}>
+
+      {/* Location */}
+      <td style={{ ...td, width: 80 }}>
         <input className="form-input" style={{ fontSize: 12 }} value={row.location} onChange={e => onUpdate(index, 'location', e.target.value)} placeholder="A-3" />
       </td>
-      <td style={{ ...tdStyle }}>
+
+      {/* Notes */}
+      <td style={{ ...td }}>
         <input className="form-input" style={{ fontSize: 12 }} value={row.notes} onChange={e => onUpdate(index, 'notes', e.target.value)} placeholder="Notes" />
       </td>
-      <td style={{ ...tdStyle, width: 36, textAlign: 'center' }}>
+
+      {/* Remove */}
+      <td style={{ ...td, width: 36, textAlign: 'center' }}>
         <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red)', padding: 4 }} onClick={() => onRemove(index)}>
           <Trash2 size={13} />
         </button>
@@ -205,9 +256,16 @@ function ProductRow({ row, index, onUpdate, onRemove, usedProductIds }: {
   );
 }
 
-const newRow = () => ({ productId: '', productName: '', sku: '', description: '', brand: '', model: '', category: '', unit: '', quantity: 1, condition: 'new', location: '', notes: '', serialNumber: '', serialMode: 'single', customSerials: [] as string[] });
+const newRow = () => ({
+  productId: '', productName: '', sku: '', description: '', brand: '', model: '',
+  category: '', unit: '', quantity: 1, condition: 'new', location: '', notes: '',
+  serialNumber: '', serialMode: 'single', customSerials: [] as string[],
+});
 
-const thStyle: React.CSSProperties = { padding: '8px 10px', fontSize: 11, color: 'var(--text-3)', fontWeight: 600, textAlign: 'left', whiteSpace: 'nowrap', background: 'var(--bg-3)' };
+const thStyle: React.CSSProperties = {
+  padding: '8px 10px', fontSize: 11, color: 'var(--text-3)',
+  fontWeight: 600, textAlign: 'left', whiteSpace: 'nowrap', background: 'var(--bg-3)',
+};
 
 export default function InventoryPage() {
   const { user } = useAuth();
@@ -219,21 +277,24 @@ export default function InventoryPage() {
 
   const isManager = user?.role === 'admin' || user?.role === 'manager';
 
-  // Filters
+  // ── Filters ──────────────────────────────────────────────────────────────
   const [search, setSearch] = useState('');
   const [schemeFilter, setSchemeFilter] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
   const [conditionFilter, setConditionFilter] = useState('');
   const [stockFilter, setStockFilter] = useState('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
-  // Modals
+  // ── Modals ────────────────────────────────────────────────────────────────
   const [showAddScheme, setShowAddScheme] = useState(false);
   const [stockTarget, setStockTarget] = useState<InventoryItem | null>(null);
   const [stockQty, setStockQty] = useState('1');
+  const [stockDate, setStockDate] = useState('');
   const [expandedSchemes, setExpandedSchemes] = useState<Set<string>>(new Set());
 
-  // Add scheme form
+  // ── Add scheme form ───────────────────────────────────────────────────────
   const [schemeNo, setSchemeNo] = useState('');
   const [projectName, setProjectName] = useState('');
   const [rows, setRows] = useState([newRow()]);
@@ -241,14 +302,14 @@ export default function InventoryPage() {
   const list = items as InventoryItem[];
   const cats = categories as Category[];
 
-  // Unique scheme numbers for filter dropdown
   const schemeOptions = useMemo(() => [...new Set(list.map(i => i.schemeNo).filter(Boolean))].sort(), [list]);
   const categoryOptions = useMemo(() => [...new Set(list.map(i => i.category).filter(Boolean))].sort(), [list]);
 
-  // Apply all filters
   const filtered = useMemo(() => list.filter(i => {
     const q = search.toLowerCase();
-    const matchSearch = !q || i.name.toLowerCase().includes(q) || i.sku.toLowerCase().includes(q) || i.schemeNo?.toLowerCase().includes(q) || i.projectName?.toLowerCase().includes(q);
+    const matchSearch = !q || i.name.toLowerCase().includes(q) || i.sku.toLowerCase().includes(q) ||
+      i.schemeNo?.toLowerCase().includes(q) || i.projectName?.toLowerCase().includes(q) ||
+      i.serialNumber?.toLowerCase().includes(q);
     const matchScheme = !schemeFilter || i.schemeNo === schemeFilter;
     const matchCat = !categoryFilter || i.category === categoryFilter;
     const matchCond = !conditionFilter || i.condition === conditionFilter;
@@ -256,14 +317,16 @@ export default function InventoryPage() {
       (stockFilter === 'in' && i.availableQuantity > 0) ||
       (stockFilter === 'out' && i.availableQuantity === 0) ||
       (stockFilter === 'low' && i.availableQuantity > 0 && i.availableQuantity <= 3);
-    return matchSearch && matchScheme && matchCat && matchCond && matchStock;
-  }), [list, search, schemeFilter, categoryFilter, conditionFilter, stockFilter]);
+    const itemDate = i.receivedAt ? new Date(i.receivedAt) : new Date(i.createdAt);
+    const matchFrom = !dateFrom || itemDate >= new Date(dateFrom);
+    const matchTo = !dateTo || itemDate <= new Date(dateTo + 'T23:59:59');
+    return matchSearch && matchScheme && matchCat && matchCond && matchStock && matchFrom && matchTo;
+  }), [list, search, schemeFilter, categoryFilter, conditionFilter, stockFilter, dateFrom, dateTo]);
 
-  // Group filtered items by scheme
   const grouped = useMemo(() => {
     const map = new Map<string, InventoryItem[]>();
     filtered.forEach(item => {
-      const key = `${item.schemeNo || '—'}||${item.projectName || '—'}`;
+      const key = `${item.sku || '—'}||${item.schemeNo || '—'}`;
       if (!map.has(key)) map.set(key, []);
       map.get(key)!.push(item);
     });
@@ -291,13 +354,17 @@ export default function InventoryPage() {
   };
 
   const usedProductIds = rows.map(r => r.productId).filter(Boolean);
-  const updateRow = useCallback((i: number, f: string, v: any) => setRows(prev => prev.map((r, idx) => idx === i ? { ...r, [f]: v } : r)), []);
-  const removeRow = useCallback((i: number) => setRows(prev => prev.filter((_, idx) => idx !== i)), []);
+  const updateRow = useCallback((i: number, f: string, v: any) =>
+    setRows(prev => prev.map((r, idx) => idx === i ? { ...r, [f]: v } : r)), []);
+  const removeRow = useCallback((i: number) =>
+    setRows(prev => prev.filter((_, idx) => idx !== i)), []);
 
   const handleSubmitScheme = async () => {
+    if (createItem.isPending) return;
     const validRows = rows.filter(r => r.sku && r.quantity > 0);
     if (!schemeNo || !projectName) { alert('Scheme No. and Project Name are required'); return; }
     if (validRows.length === 0) { alert('Add at least one product row with a SKU'); return; }
+
     for (const row of validRows) {
       const base = {
         productId: row.productId || undefined,
@@ -331,18 +398,28 @@ export default function InventoryPage() {
       }
     }
     setShowAddScheme(false);
+    setRows([newRow()]);
     refetch();
   };
 
-  // Excel export
   const exportExcel = () => {
     const exportItems = selectedIds.size > 0 ? filtered.filter(i => selectedIds.has(i.id)) : filtered;
     const data = exportItems.map(i => ({
-      'Name': i.name, 'SKU': i.sku, 'Scheme No.': i.schemeNo || '', 'Project': i.projectName || '',
-      'Category': i.category || '', 'Brand': i.brand || '', 'Condition': i.condition,
-      'Total Qty': i.totalQuantity, 'Available': i.availableQuantity,
-      'Assigned': i.assignedQuantity, 'Used': i.usedQuantity,
-      'Location': i.location || '', 'Notes': i.notes || '',
+      'Name': i.name,
+      'SKU': i.sku,
+      'Serial No.': i.serialNumber || '',
+      'Scheme No.': i.schemeNo || '',
+      'Project': i.projectName || '',
+      'Category': i.category || '',
+      'Brand': i.brand || '',
+      'Condition': i.condition,
+      'Total Qty': i.totalQuantity,
+      'Available': i.availableQuantity,
+      'Assigned': i.assignedQuantity,
+      'Used': i.usedQuantity,
+      'Location': i.location || '',
+      'Notes': i.notes || '',
+      'Received Date': i.receivedAt ? format(new Date(i.receivedAt), 'yyyy-MM-dd') : i.createdAt ? format(new Date(i.createdAt), 'yyyy-MM-dd') : '',
     }));
     const ws = XLSX.utils.json_to_sheet(data);
     const wb = XLSX.utils.book_new();
@@ -350,34 +427,44 @@ export default function InventoryPage() {
     XLSX.writeFile(wb, `inventory-${new Date().toISOString().split('T')[0]}.xlsx`);
   };
 
-  const clearFilters = () => { setSearch(''); setSchemeFilter(''); setCategoryFilter(''); setConditionFilter(''); setStockFilter(''); };
-  const hasFilters = search || schemeFilter || categoryFilter || conditionFilter || stockFilter;
+  const clearFilters = () => {
+    setSearch(''); setSchemeFilter(''); setCategoryFilter('');
+    setConditionFilter(''); setStockFilter(''); setDateFrom(''); setDateTo('');
+  };
+  const hasFilters = search || schemeFilter || categoryFilter || conditionFilter || stockFilter || dateFrom || dateTo;
+
+  const today = new Date().toISOString().split('T')[0];
 
   return (
     <div className="page">
       <div className="page-header flex items-center justify-between">
         <div>
           <h1>Inventory</h1>
-          <p>{list.length} items · {grouped.length} scheme{grouped.length !== 1 ? 's' : ''}{selectedIds.size > 0 ? ` · ${selectedIds.size} selected` : ''}</p>
+          <p>
+            {list.length} items · {grouped.length} scheme{grouped.length !== 1 ? 's' : ''}
+            {selectedIds.size > 0 ? ` · ${selectedIds.size} selected` : ''}
+          </p>
         </div>
         <div className="flex gap-2">
           <button className="btn btn-ghost" onClick={exportExcel}>
             <Download size={14} /> Export{selectedIds.size > 0 ? ` (${selectedIds.size})` : ' All'}
           </button>
           {isManager && (
-            <button className="btn btn-primary" onClick={() => { setSchemeNo(''); setProjectName(''); setRows([newRow()]); setShowAddScheme(true); }}>
+            <button className="btn btn-primary" onClick={() => {
+              setSchemeNo(''); setProjectName(''); setRows([newRow()]); setShowAddScheme(true);
+            }}>
               <Plus size={15} /> Add Inventory
             </button>
           )}
         </div>
       </div>
 
-      {/* Filters */}
+      {/* ── Filters ── */}
       <div style={{ background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', padding: '14px 18px', marginBottom: 20 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr auto', gap: 10, alignItems: 'end' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr', gap: 10, marginBottom: 10 }}>
           <div className="search-bar">
             <Search size={14} />
-            <input placeholder="Search name, SKU, scheme, project…" value={search} onChange={e => setSearch(e.target.value)} />
+            <input placeholder="Search name, SKU, serial, scheme…" value={search} onChange={e => setSearch(e.target.value)} />
           </div>
           <select className="form-input" value={schemeFilter} onChange={e => setSchemeFilter(e.target.value)}>
             <option value="">All Schemes</option>
@@ -389,7 +476,9 @@ export default function InventoryPage() {
           </select>
           <select className="form-input" value={conditionFilter} onChange={e => setConditionFilter(e.target.value)}>
             <option value="">All Conditions</option>
-            {['new', 'good', 'fair', 'poor'].map(c => <option key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</option>)}
+            {['new', 'good', 'fair', 'poor'].map(c => (
+              <option key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</option>
+            ))}
           </select>
           <select className="form-input" value={stockFilter} onChange={e => setStockFilter(e.target.value)}>
             <option value="">All Stock</option>
@@ -397,9 +486,22 @@ export default function InventoryPage() {
             <option value="low">Low (≤3)</option>
             <option value="out">Out of Stock</option>
           </select>
+        </div>
+        {/* Date filters row */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ fontSize: 12, color: 'var(--text-3)', whiteSpace: 'nowrap' }}>Received date:</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1 }}>
+            <input type="date" className="form-input" style={{ width: 160 }} max={today}
+              value={dateFrom} onChange={e => setDateFrom(e.target.value)}
+              title="From date" />
+            <span style={{ color: 'var(--text-3)', fontSize: 13 }}>→</span>
+            <input type="date" className="form-input" style={{ width: 160 }} max={today}
+              value={dateTo} onChange={e => setDateTo(e.target.value)}
+              title="To date" />
+          </div>
           {hasFilters && (
-            <button className="btn btn-ghost btn-sm" onClick={clearFilters} title="Clear filters">
-              <Filter size={13} /> Clear
+            <button className="btn btn-ghost btn-sm" onClick={clearFilters}>
+              <Filter size={13} /> Clear all
             </button>
           )}
         </div>
@@ -410,13 +512,18 @@ export default function InventoryPage() {
         )}
       </div>
 
+      {/* ── List ── */}
       {isLoading ? (
         <div className="empty-state"><Package size={40} /><span>Loading…</span></div>
       ) : grouped.length === 0 ? (
         <div className="empty-state">
           <Package size={48} style={{ color: 'var(--text-3)' }} />
           <span>{hasFilters ? 'No items match your filters' : 'No inventory items yet'}</span>
-          {!hasFilters && <p style={{ fontSize: 13, color: 'var(--text-3)', marginTop: 8 }}>Click "Add Inventory" to start adding items by scheme</p>}
+          {!hasFilters && (
+            <p style={{ fontSize: 13, color: 'var(--text-3)', marginTop: 8 }}>
+              Click "Add Inventory" to start adding items by scheme
+            </p>
+          )}
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -433,12 +540,17 @@ export default function InventoryPage() {
             return (
               <div key={key} className="card" style={{ padding: 0, overflow: 'hidden' }}>
                 {/* Scheme header */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '13px 18px', borderBottom: expanded ? '1px solid var(--border)' : 'none', cursor: 'pointer' }}
-                  onClick={() => toggleScheme(key)}>
-                  <input type="checkbox" checked={allSchemeSelected} ref={el => { if (el) el.indeterminate = someSchemeSelected && !allSchemeSelected; }}
+                <div
+                  style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '13px 18px', borderBottom: expanded ? '1px solid var(--border)' : 'none', cursor: 'pointer' }}
+                  onClick={() => toggleScheme(key)}
+                >
+                  <input type="checkbox"
+                    checked={allSchemeSelected}
+                    ref={el => { if (el) el.indeterminate = someSchemeSelected && !allSchemeSelected; }}
                     onChange={e => { e.stopPropagation(); toggleSelectScheme(groupItems); }}
                     onClick={e => e.stopPropagation()}
-                    style={{ cursor: 'pointer' }} />
+                    style={{ cursor: 'pointer' }}
+                  />
                   <ChevronDown size={15} style={{ color: 'var(--text-3)', flexShrink: 0, transform: expanded ? 'rotate(0)' : 'rotate(-90deg)', transition: 'transform 0.15s' }} />
                   <div style={{ flex: 1 }}>
                     <span style={{ fontWeight: 700, fontSize: 15 }}>{sNo}</span>
@@ -457,6 +569,7 @@ export default function InventoryPage() {
                           <th style={{ width: 36, textAlign: 'center' }}></th>
                           <th>Product</th>
                           <th>SKU</th>
+                          <th>Serial No.</th>
                           <th>Category</th>
                           <th style={{ textAlign: 'center' }}>Total</th>
                           <th style={{ textAlign: 'center' }}>Avail.</th>
@@ -464,6 +577,7 @@ export default function InventoryPage() {
                           <th style={{ textAlign: 'center' }}>Used</th>
                           <th>Condition</th>
                           <th>Location</th>
+                          <th>Received</th>
                           {isManager && <th>Actions</th>}
                         </tr>
                       </thead>
@@ -471,6 +585,7 @@ export default function InventoryPage() {
                         {groupItems.map(item => {
                           const ap2 = item.totalQuantity > 0 ? item.availableQuantity / item.totalQuantity : 0;
                           const ac = ap2 === 0 ? 'var(--red)' : ap2 < 0.3 ? 'var(--yellow)' : 'var(--green)';
+                          const receivedDate = item.receivedAt || item.createdAt;
                           return (
                             <tr key={item.id} style={{ background: selectedIds.has(item.id) ? 'var(--accent-dim)' : undefined }}>
                               <td style={{ textAlign: 'center' }}>
@@ -480,18 +595,32 @@ export default function InventoryPage() {
                                 <div style={{ fontWeight: 500 }}>{item.name}</div>
                                 {item.description && <div style={{ fontSize: 11, color: 'var(--text-3)' }}>{item.description}</div>}
                               </td>
-                              <td><code style={{ fontSize: 11, background: 'var(--bg-3)', padding: '2px 6px', borderRadius: 4, color: 'var(--accent)' }}>{item.sku}</code></td>
+                              <td>
+                                <code style={{ fontSize: 11, background: 'var(--bg-3)', padding: '2px 6px', borderRadius: 4, color: 'var(--accent)' }}>{item.sku}</code>
+                              </td>
+                              <td style={{ fontSize: 12, color: 'var(--text-2)', fontFamily: 'monospace' }}>
+                                {item.serialNumber || '—'}
+                              </td>
                               <td style={{ fontSize: 12, color: 'var(--text-2)' }}>{item.category || '—'}</td>
                               <td style={{ textAlign: 'center', fontWeight: 600 }}>{item.totalQuantity}</td>
                               <td style={{ textAlign: 'center', fontWeight: 700, color: ac }}>{item.availableQuantity}</td>
                               <td style={{ textAlign: 'center', color: 'var(--yellow)' }}>{item.assignedQuantity}</td>
                               <td style={{ textAlign: 'center', color: 'var(--purple)' }}>{item.usedQuantity}</td>
-                              <td><span className={`badge badge-${item.condition === 'new' ? 'green' : item.condition === 'good' ? 'blue' : item.condition === 'fair' ? 'yellow' : 'red'}`}>{item.condition}</span></td>
+                              <td>
+                                <span className={`badge badge-${item.condition === 'new' ? 'green' : item.condition === 'good' ? 'blue' : item.condition === 'fair' ? 'yellow' : 'red'}`}>
+                                  {item.condition}
+                                </span>
+                              </td>
                               <td style={{ fontSize: 12, color: 'var(--text-2)' }}>{item.location || '—'}</td>
+                              <td style={{ fontSize: 12, color: 'var(--text-2)', whiteSpace: 'nowrap' }}>
+                                {receivedDate ? format(new Date(receivedDate), 'dd MMM yyyy') : '—'}
+                              </td>
                               {isManager && (
                                 <td>
                                   <div className="flex gap-2">
-                                    <button className="btn btn-ghost btn-sm" onClick={() => { setStockTarget(item); setStockQty('1'); }}>+ Stock</button>
+                                    <button className="btn btn-ghost btn-sm" onClick={() => { setStockTarget(item); setStockQty('1'); setStockDate(''); }}>
+                                      + Stock
+                                    </button>
                                     {user?.role === 'admin' && (
                                       <button className="btn btn-danger btn-sm btn-icon" onClick={() => { if (confirm(`Remove "${item.name}"?`)) deleteItem.mutate(item.id); }}>
                                         <Trash2 size={13} />
@@ -513,11 +642,12 @@ export default function InventoryPage() {
         </div>
       )}
 
-      {/* Add Inventory Modal */}
+      {/* ── Add Inventory Modal ── */}
       <Modal isOpen={showAddScheme} onClose={() => setShowAddScheme(false)} title="Add Inventory" size="xl"
         footer={<>
           <button className="btn btn-ghost" onClick={() => setShowAddScheme(false)}>Cancel</button>
-          <button className="btn btn-primary" onClick={handleSubmitScheme} disabled={createItem.isPending || !schemeNo || !projectName}>
+          <button className="btn btn-primary" onClick={handleSubmitScheme}
+            disabled={createItem.isPending || !schemeNo || !projectName}>
             {createItem.isPending ? 'Saving…' : `Add ${rows.filter(r => r.sku).length || 0} Item(s)`}
           </button>
         </>}>
@@ -557,16 +687,29 @@ export default function InventoryPage() {
             </tbody>
           </table>
         </div>
-        <button className="btn btn-ghost" style={{ marginTop: 10, width: '100%', justifyContent: 'center' }} onClick={() => setRows(prev => [...prev, newRow()])}>
+        <button className="btn btn-ghost" style={{ marginTop: 10, width: '100%', justifyContent: 'center' }}
+          onClick={() => setRows(prev => [...prev, newRow()])}>
           <Plus size={14} /> Add Another Product
         </button>
       </Modal>
 
-      {/* Add Stock Modal */}
-      <Modal isOpen={!!stockTarget} onClose={() => setStockTarget(null)} title={`Add Stock — ${stockTarget?.name}`}
+      {/* ── Add Stock Modal ── */}
+      <Modal isOpen={!!stockTarget} onClose={() => { setStockTarget(null); setStockDate(''); }}
+        title={`Add Stock — ${stockTarget?.name}`}
         footer={<>
-          <button className="btn btn-ghost" onClick={() => setStockTarget(null)}>Cancel</button>
-          <button className="btn btn-primary" onClick={async () => { if (!stockTarget) return; await addStock.mutateAsync({ id: stockTarget.id, quantity: parseInt(stockQty) }); setStockTarget(null); }} disabled={addStock.isPending}>
+          <button className="btn btn-ghost" onClick={() => { setStockTarget(null); setStockDate(''); }}>Cancel</button>
+          <button className="btn btn-primary"
+            onClick={async () => {
+              if (!stockTarget) return;
+              await addStock.mutateAsync({
+                id: stockTarget.id,
+                quantity: parseInt(stockQty),
+                receivedAt: stockDate || undefined,
+              });
+              setStockTarget(null);
+              setStockDate('');
+            }}
+            disabled={addStock.isPending}>
             {addStock.isPending ? 'Adding…' : 'Add Stock'}
           </button>
         </>}>
@@ -575,15 +718,42 @@ export default function InventoryPage() {
             <div style={{ background: 'var(--bg-3)', borderRadius: 10, padding: 14, marginBottom: 16 }}>
               <div style={{ fontWeight: 600 }}>{stockTarget.name}</div>
               <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 4 }}>
-                SKU: {stockTarget.sku} · Current: <strong style={{ color: 'var(--text)' }}>{stockTarget.totalQuantity}</strong> total · <strong style={{ color: 'var(--green)' }}>{stockTarget.availableQuantity}</strong> available
+                SKU: {stockTarget.sku}
+                {stockTarget.serialNumber && <span> · Serial: <code style={{ color: 'var(--accent)' }}>{stockTarget.serialNumber}</code></span>}
+                {' · '}Current: <strong style={{ color: 'var(--text)' }}>{stockTarget.totalQuantity}</strong> total
+                {' · '}<strong style={{ color: 'var(--green)' }}>{stockTarget.availableQuantity}</strong> available
               </div>
+              {(stockTarget.receivedAt || stockTarget.createdAt) && (
+                <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 4 }}>
+                  Last received: {format(new Date(stockTarget.receivedAt || stockTarget.createdAt), 'dd MMM yyyy')}
+                </div>
+              )}
             </div>
+
             <div className="form-group">
-              <label className="form-label">Quantity to Add</label>
-              <input type="number" min="1" className="form-input" value={stockQty} onChange={e => setStockQty(e.target.value)} autoFocus />
+              <label className="form-label">Quantity to Add *</label>
+              <input type="number" min="1" className="form-input"
+                value={stockQty}
+                onChange={e => setStockQty(e.target.value)}
+                autoFocus
+              />
             </div>
+
+            <div className="form-group">
+              <label className="form-label">Received Date</label>
+              <input type="date" className="form-input"
+                value={stockDate}
+                onChange={e => setStockDate(e.target.value)}
+                max={today}
+                placeholder="Leave blank for today"
+              />
+              <p style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 4 }}>
+                Leave blank to use today's date
+              </p>
+            </div>
+
             {parseInt(stockQty) > 0 && (
-              <div style={{ fontSize: 13, color: 'var(--text-2)' }}>
+              <div style={{ fontSize: 13, color: 'var(--text-2)', marginTop: -8 }}>
                 New total: <strong style={{ color: 'var(--green)' }}>{stockTarget.totalQuantity + parseInt(stockQty)}</strong>
               </div>
             )}

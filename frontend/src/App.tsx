@@ -16,6 +16,7 @@ import ItemRequestsPage from './pages/ItemRequestsPage';
 import CategoriesPage from './pages/CategoriesPage';
 import ProductsPage from './pages/ProductsPage';
 import './styles/global.css';
+import StockReportPage from './pages/StockReportPage';
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30_000 } },
@@ -37,6 +38,7 @@ export default function App() {
                 <Route path="/transfers" element={<TransfersPage />} />
                 <Route path="/returns" element={<ReturnRequestsPage />} />
                 <Route path="/usage" element={<UsagePage />} />
+                <Route path="/stock-report" element={<RequireRole roles={['admin', 'manager']}><StockReportPage /></RequireRole>} />
               <Route path="/categories" element={<RequireRole roles={['admin', 'manager']}><CategoriesPage /></RequireRole>} />
               <Route path="/products" element={<RequireRole roles={['admin', 'manager']}><ProductsPage /></RequireRole>} />
                 <Route path="/users" element={

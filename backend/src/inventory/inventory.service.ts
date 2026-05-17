@@ -88,6 +88,8 @@ export class InventoryService {
     const item = await this.findOne(id);
     item.totalQuantity += dto.quantity;
     item.availableQuantity += dto.quantity;
+    if (dto.receivedAt) item.receivedAt = dto.receivedAt;
+    if (dto.schemeNo) item.schemeNo = dto.schemeNo;
     return this.itemRepository.save(item);
   }
 

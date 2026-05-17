@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '../lib/api';
 import toast from 'react-hot-toast';
 
+
 // ── Inventory ──────────────────────────────────────────────────────────────
 export const useInventory = () =>
   useQuery({
@@ -36,8 +37,8 @@ export const useUpdateItem = () => {
 export const useAddStock = () => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, quantity }: { id: string; quantity: number }) =>
-      api.patch(`/inventory/${id}/stock`, { quantity }).then(r => r.data.data),
+    mutationFn: ({ id, quantity, receivedAt }: { id: string; quantity: number; receivedAt?: string }) =>
+      api.patch(`/inventory/${id}/stock`, { quantity, receivedAt }).then(r => r.data.data),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['inventory'] }); qc.invalidateQueries({ queryKey: ['inventory-stats'] }); toast.success('Stock updated'); },
     onError: (e: any) => toast.error(e.response?.data?.message || 'Failed'),
   });

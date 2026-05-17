@@ -5,6 +5,7 @@ import {
   Min,
   IsEnum,
   IsNotEmpty,
+  IsUUID,
 } from 'class-validator';
 import { ItemCondition } from '../entities/inventory-item.entity';
 
@@ -14,12 +15,20 @@ export class CreateInventoryItemDto {
   name: string;
 
   @IsOptional()
+  @IsUUID()
+  productId?: string;  
+
+  @IsOptional()
   @IsString()
   description?: string;
 
   @IsString()
   @IsNotEmpty()
   sku: string;
+
+    @IsOptional()
+  @IsString()
+  serialNumber?: string;  
 
   @IsString()
   @IsNotEmpty()
@@ -41,9 +50,6 @@ export class CreateInventoryItemDto {
   @IsString()
   model?: string;
 
-  @IsOptional()
-  @IsString()
-  serialNumber?: string;
 
   @IsInt()
   @Min(0)

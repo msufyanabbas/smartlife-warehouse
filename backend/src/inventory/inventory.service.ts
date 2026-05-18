@@ -39,8 +39,11 @@ export class InventoryService {
     const existing = await this.itemRepository.findOne({
       where: { sku: dto.sku },
     });
-    if (existing) throw new ConflictException(`SKU '${dto.sku}' already exists`);
-
+  if (existing) {
+    existing.totalQuantity += dto.totalQuantity;
+    existing.availableQuantity += dto.totalQuantity;
+    return this.itemRepository.save(existing);
+  }
     const item = this.itemRepository.create({
       ...dto,
       availableQuantity: dto.totalQuantity,

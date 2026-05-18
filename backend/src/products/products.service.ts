@@ -70,15 +70,11 @@ export class ProductsService {
     return this.productRepository.save(product);
   }
 
-  async update(id: string, dto: UpdateProductDto) {
-    const product = await this.findOne(id);
-    if (dto.sku && dto.sku !== product.sku) {
-      const existing = await this.productRepository.findOne({ where: { sku: dto.sku } });
-      if (existing) throw new ConflictException(`SKU "${dto.sku}" already taken`);
-    }
-    Object.assign(product, dto);
-    return this.productRepository.save(product);
-  }
+async update(id: string, dto: UpdateProductDto) {
+  // Use repository.update() directly — no entity loading needed
+  await this.productRepository.update(id, dto);
+  return this.findOne(id); // reload with category relation
+}
 
   async remove(id: string) {
     const product = await this.findOne(id);

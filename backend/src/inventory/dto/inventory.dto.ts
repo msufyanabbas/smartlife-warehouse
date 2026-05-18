@@ -138,6 +138,7 @@ schemeNo?: string;
 receivedAt?: Date;
 }
 
+
 export class BulkCreateInventoryDto {
   items: CreateInventoryItemDto[];
 }

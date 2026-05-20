@@ -78,8 +78,7 @@ async update(id: string, dto: UpdateProductDto) {
 
   async remove(id: string) {
     const product = await this.findOne(id);
-    product.isActive = false;
-    await this.productRepository.save(product);
+    await this.productRepository.remove(product);
     return { message: 'Product removed' };
   }
 }

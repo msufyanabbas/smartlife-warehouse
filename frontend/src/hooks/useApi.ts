@@ -33,7 +33,6 @@ export const useUpdateItem = () => {
     onError: (e: any) => toast.error(e.response?.data?.message || 'Failed to update item'),
   });
 };
-
 export const useAddStock = () => {
   const qc = useQueryClient();
   return useMutation({
@@ -428,8 +427,12 @@ export const useCreateProduct = () => {
 export const useUpdateProduct = () => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, data }: { id: string; data: any }) => api.put(`/products/${id}`, data).then(r => r.data.data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['products'] }); toast.success('Product updated'); },
+    mutationFn: ({ id, data }: { id: string; data: any }) =>
+      api.put(`/products/${id}`, data).then(r => r.data.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['products'] });  // ← must be here
+      toast.success('Product updated');
+    },
     onError: (e: any) => toast.error(e.response?.data?.message || 'Failed'),
   });
 };

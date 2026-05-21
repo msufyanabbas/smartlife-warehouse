@@ -342,9 +342,9 @@ function ProductRow({ row, index, onUpdate, onRemove, usedProductIds, categories
         </td>
 
         {/* Qty — must always stay visible, aligned to top so serial expansion never hides it */}
-        <td style={{ ...td, width: 60, verticalAlign: 'top', borderTop: cellTop }}>
+        <td style={{ ...td, width: 85, verticalAlign: 'top', borderTop: cellTop }}>
           <input className="form-input" type="number" min="1"
-            style={{ fontSize: 13, textAlign: 'center', minWidth: 55 }}
+            style={{ fontSize: 13, textAlign: 'center', width: '100%', minWidth: 70 }}
             value={row.quantity}
             onChange={e => {
               const q = parseInt(e.target.value) || 1;
@@ -835,7 +835,7 @@ export default function InventoryPage() {
         </div>
 
         <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 8 }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 900 }}>
             <thead>
               <tr>
                 <th style={{ ...thStyle, width: 28, textAlign: 'center' }}>#</th>
@@ -843,7 +843,7 @@ export default function InventoryPage() {
                 <th style={{ ...thStyle, width: 90 }}>SKU</th>
                 <th style={{ ...thStyle, width: 110 }}>Category</th>
                 <th style={{ ...thStyle, width: 130 }}>Serial No.</th>
-                <th style={{ ...thStyle, width: 60, textAlign: 'center' }}>Qty</th>
+                <th style={{ ...thStyle, width: 85, minWidth: 85, textAlign: 'center' }}>Qty</th>
                 <th style={{ ...thStyle, width: 32 }}></th>
               </tr>
             </thead>

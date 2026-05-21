@@ -3,7 +3,7 @@ import * as XLSX from 'xlsx';
 import { ArrowLeftRight, Plus, Check, X, Ban, AlertCircle, Search, Download } from 'lucide-react';
 import {
   useTransferRequests, useCreateTransfer, useReviewTransfer,
-  useCancelTransfer, useMyInventory, useWorkers,
+  useCancelTransfer, useAssignments, useWorkers,
 } from '../hooks/useApi';
 import { useAuth } from '../contexts/AuthContext';
 import type { TransferRequest } from '../types';
@@ -21,7 +21,7 @@ function statusBadge(s: string) {
 export default function TransfersPage() {
   const { user } = useAuth();
   const { data: transfers = [], isLoading } = useTransferRequests();
-  const { data: myInventory = [] } = useMyInventory(); // returns ALL assignments for managers
+  const { data: assignments = [] } = useAssignments(); // all active assignments (own only for workers)
   const { data: workers = [] } = useWorkers();
   const createTransfer = useCreateTransfer();
   const reviewTransfer = useReviewTransfer();
@@ -38,11 +38,11 @@ export default function TransfersPage() {
   const [rejectTarget, setRejectTarget] = useState<TransferRequest | null>(null);
   const [rejectReason, setRejectReason] = useState('');
   const [form, setForm] = useState({
-    toUserId: '', sourceAssignmentId: '', itemId: '', quantity: 1, reason: '',
+    fromUserId: '', toUserId: '', sourceAssignmentId: '', itemId: '', quantity: 1, reason: '',
   });
 
   const allTransfers = transfers as TransferRequest[];
-  const allAssignments = myInventory as any[];
+  const allAssignments = assignments as any[];
 
   // For managers: group assignments by worker for the dropdown
   const uniqueFromUsers = [...new Map(allTransfers.map(t => [t.fromUserId, t.fromUser])).values()].filter(Boolean);
@@ -69,21 +69,36 @@ export default function TransfersPage() {
 
   const selectedAssignment = allAssignments.find(a => a.id === form.sourceAssignmentId);
 
-  // Workers picking from their own; managers see all assignments
-  const assignmentOptions = isManager
-    ? allAssignments
-    : allAssignments.filter(a => a.assignedToId === user?.id);
+  // Workers who currently hold active assignments — the "FROM" dropdown for managers
+  const fromWorkerOptions = [...new Map(
+    allAssignments
+      .filter(a => a.assignedTo)
+      .map(a => [a.assignedToId, a.assignedTo])
+  ).values()];
 
-  // Exclude the assignment owner from the "to" dropdown
-  const toWorkerOptions = (workers as any[]).filter(w => {
-    if (!selectedAssignment) return w.id !== user?.id;
-    return w.id !== selectedAssignment.assignedToId;
-  });
+  // Active assignments held by the selected FROM worker — the item dropdown source
+  const fromAssignments = allAssignments.filter(a => a.assignedToId === form.fromUserId);
+
+  // "TO" dropdown: all workers except the FROM worker
+  const toWorkerOptions = (workers as any[]).filter(w => w.id !== form.fromUserId);
+
+  const openCreate = () => {
+    setForm({
+      fromUserId: isManager ? '' : (user?.id || ''),
+      toUserId: '', sourceAssignmentId: '', itemId: '', quantity: 1, reason: '',
+    });
+    setShowCreate(true);
+  };
 
   const handleCreate = async () => {
-    await createTransfer.mutateAsync(form);
+    await createTransfer.mutateAsync({
+      toUserId: form.toUserId,
+      itemId: form.itemId,
+      sourceAssignmentId: form.sourceAssignmentId,
+      quantity: form.quantity,
+      reason: form.reason || undefined,
+    });
     setShowCreate(false);
-    setForm({ toUserId: '', sourceAssignmentId: '', itemId: '', quantity: 1, reason: '' });
   };
 
   const handleApprove = (id: string) => {
@@ -130,7 +145,7 @@ export default function TransfersPage() {
               <Download size={14} /> Export Excel
             </button>
           )}
-          <button className="btn btn-primary" onClick={() => setShowCreate(true)}>
+          <button className="btn btn-primary" onClick={openCreate}>
             <Plus size={15} /> New Transfer
           </button>
         </div>
@@ -224,7 +239,7 @@ export default function TransfersPage() {
         <div className="empty-state">
           <ArrowLeftRight size={40} />
           <span>No transfer requests found</span>
-          <button className="btn btn-ghost btn-sm" style={{ marginTop: 8 }} onClick={() => setShowCreate(true)}>
+          <button className="btn btn-ghost btn-sm" style={{ marginTop: 8 }} onClick={openCreate}>
             Create your first transfer request
           </button>
         </div>
@@ -302,33 +317,55 @@ export default function TransfersPage() {
         footer={<>
           <button className="btn btn-ghost" onClick={() => setShowCreate(false)}>Cancel</button>
           <button className="btn btn-primary" onClick={handleCreate}
-            disabled={createTransfer.isPending || !form.toUserId || !form.sourceAssignmentId || form.quantity < 1}>
+            disabled={createTransfer.isPending || !form.fromUserId || !form.toUserId || !form.sourceAssignmentId || form.quantity < 1}>
             {createTransfer.isPending ? 'Submitting…' : 'Submit Request'}
           </button>
         </>}>
         <div style={{ background: 'var(--bg-3)', borderRadius: 'var(--radius)', padding: '12px 16px', fontSize: 12, color: 'var(--text-2)', lineHeight: 1.7 }}>
           {isManager
-            ? 'As a manager you can initiate transfers from any worker\'s assigned items.'
+            ? 'Pick the worker who currently holds the item, the item from their active assignments, and the worker who will receive it.'
             : 'Select an item from your inventory and the worker you want to transfer it to.'}
         </div>
         <div className="form-group">
-          <label className="form-label">
-            {isManager ? 'Source Assignment (any worker)' : 'Item from my inventory'} *
-          </label>
-          <select className="form-input" value={form.sourceAssignmentId} onChange={e => {
-            const a = allAssignments.find(x => x.id === e.target.value);
-            setForm({ ...form, sourceAssignmentId: e.target.value, itemId: a?.itemId || '', quantity: 1 });
-          }}>
-            <option value="">Select assignment…</option>
-            {assignmentOptions.map((a: any) => (
-              <option key={a.id} value={a.id}>
-                {isManager
-                  ? `${a.assignedTo?.firstName || ''} ${a.assignedTo?.lastName || ''} — ${a.item?.name} (${a.quantity} units)`
-                  : `${a.item?.name} — ${a.quantity} assigned to me`
-                }
-              </option>
+          <label className="form-label">From worker {isManager ? '(current holder)' : ''} *</label>
+          {isManager ? (
+            <select className="form-input" value={form.fromUserId} onChange={e =>
+              setForm({ ...form, fromUserId: e.target.value, sourceAssignmentId: '', itemId: '', quantity: 1 })
+            }>
+              <option value="">Select worker…</option>
+              {fromWorkerOptions.map((w: any) => (
+                <option key={w.id} value={w.id}>{w.firstName} {w.lastName}</option>
+              ))}
+            </select>
+          ) : (
+            <input className="form-input" readOnly
+              style={{ background: 'var(--bg-4)', cursor: 'not-allowed' }}
+              value={`${user?.firstName || ''} ${user?.lastName || ''} (me)`.trim()} />
+          )}
+          {isManager && fromWorkerOptions.length === 0 && (
+            <p style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 4 }}>
+              No workers have active assignments yet.
+            </p>
+          )}
+        </div>
+        <div className="form-group">
+          <label className="form-label">Item to transfer *</label>
+          <select className="form-input" value={form.sourceAssignmentId}
+            disabled={!form.fromUserId}
+            onChange={e => {
+              const a = allAssignments.find(x => x.id === e.target.value);
+              setForm({ ...form, sourceAssignmentId: e.target.value, itemId: a?.itemId || '', quantity: 1 });
+            }}>
+            <option value="">{form.fromUserId ? 'Select item…' : 'Select a "from" worker first'}</option>
+            {fromAssignments.map((a: any) => (
+              <option key={a.id} value={a.id}>{a.item?.name} — {a.quantity} assigned</option>
             ))}
           </select>
+          {form.fromUserId && fromAssignments.length === 0 && (
+            <p style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 4 }}>
+              This worker has no active assignments to transfer.
+            </p>
+          )}
         </div>
         <div className="form-group">
           <label className="form-label">Transfer to worker *</label>

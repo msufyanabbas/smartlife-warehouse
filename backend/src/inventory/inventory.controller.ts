@@ -66,7 +66,7 @@ export class InventoryController {
   }
 
   @Delete(':id')
-  @Roles(Role.ADMIN)
+  @Roles(Role.ADMIN, Role.MANAGER)
   remove(@Param('id') id: string) {
     return this.inventoryService.remove(id);
   }

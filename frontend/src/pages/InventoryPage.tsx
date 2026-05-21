@@ -240,7 +240,12 @@ function CategoryAutocomplete({ value, onChange, categories, readOnly }: {
   );
 }
 
-// ── Product row in Add Inventory table ────────────────────────────────────
+const subLabel: React.CSSProperties = {
+  display: 'block', fontSize: 10, color: 'var(--text-3)', fontWeight: 600,
+  marginBottom: 3, textTransform: 'uppercase', letterSpacing: '0.04em',
+};
+
+// ── Product row in Add Inventory table — two rows per product ─────────────
 function ProductRow({ row, index, onUpdate, onRemove, usedProductIds, categories }: {
   row: any; index: number;
   onUpdate: (i: number, f: string, v: any) => void;
@@ -249,127 +254,139 @@ function ProductRow({ row, index, onUpdate, onRemove, usedProductIds, categories
   categories: Category[];
 }) {
   const td: React.CSSProperties = { padding: '6px 8px', verticalAlign: 'top' };
+  const cellTop = '2px solid var(--border)';
+  const rowBg = index % 2 === 0 ? 'var(--bg-2)' : 'var(--bg-3)';
 
   return (
-    <tr style={{ borderBottom: '1px solid var(--border)', background: index % 2 === 0 ? 'var(--bg-2)' : 'var(--bg-3)' }}>
-      <td style={{ ...td, width: 28, textAlign: 'center', color: 'var(--text-3)', fontSize: 12, verticalAlign: 'middle' }}>{index + 1}</td>
+    <>
+      {/* Row 1 — primary fields */}
+      <tr style={{ background: rowBg }}>
+        <td rowSpan={2} style={{ ...td, width: 28, textAlign: 'center', color: 'var(--text-3)', fontSize: 12, verticalAlign: 'middle', borderTop: cellTop }}>
+          {index + 1}
+        </td>
 
-      {/* Product search */}
-      <td style={{ ...td, minWidth: 260 }}>
-        <ProductAutocomplete row={row} index={index} onUpdate={onUpdate} usedProductIds={usedProductIds} />
-      </td>
+        {/* Product search — most important field, gets the most space */}
+        <td style={{ ...td, minWidth: 200, borderTop: cellTop }}>
+          <ProductAutocomplete row={row} index={index} onUpdate={onUpdate} usedProductIds={usedProductIds} />
+        </td>
 
-      {/* SKU - auto-filled, readonly when product selected */}
-      <td style={{ ...td, width: 110 }}>
-        <input className="form-input"
-          style={{ fontSize: 12, fontFamily: 'monospace', color: 'var(--accent)', background: row.productId ? 'var(--bg-4)' : undefined }}
-          value={row.sku} onChange={e => onUpdate(index, 'sku', e.target.value)}
-          placeholder="SKU" readOnly={!!row.productId} />
-      </td>
+        {/* SKU - auto-filled, readonly when product selected */}
+        <td style={{ ...td, width: 90, borderTop: cellTop }}>
+          <input className="form-input"
+            style={{ fontSize: 12, fontFamily: 'monospace', color: 'var(--accent)', background: row.productId ? 'var(--bg-4)' : undefined }}
+            value={row.sku} onChange={e => onUpdate(index, 'sku', e.target.value)}
+            placeholder="SKU" readOnly={!!row.productId} />
+        </td>
 
-      {/* Category - auto-filled or searchable */}
-      <td style={{ ...td, width: 160 }}>
-        <CategoryAutocomplete
-          value={row.category}
-          onChange={v => onUpdate(index, 'category', v)}
-          categories={categories}
-          readOnly={!!row.productId}
-        />
-      </td>
+        {/* Category - auto-filled or searchable */}
+        <td style={{ ...td, width: 110, borderTop: cellTop }}>
+          <CategoryAutocomplete
+            value={row.category}
+            onChange={v => onUpdate(index, 'category', v)}
+            categories={categories}
+            readOnly={!!row.productId}
+          />
+        </td>
 
-      {/* Serial Number with sequential/custom toggle */}
-      <td style={{ ...td, width: 180 }}>
-        <input className="form-input"
-          style={{ fontSize: 12, fontFamily: 'monospace' }}
-          value={row.serialNumber || ''}
-          onChange={e => onUpdate(index, 'serialNumber', e.target.value)}
-          placeholder={row.quantity > 1 ? 'Base e.g. SN-001' : 'Serial No.'}
-        />
-        {row.quantity > 1 && (
-          <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
-            <button type="button"
-              onClick={() => onUpdate(index, 'serialMode', 'sequential')}
-              style={{ flex: 1, fontSize: 10, padding: '3px 4px', border: '1px solid var(--border)', borderRadius: 4, cursor: 'pointer', background: row.serialMode !== 'custom' ? 'var(--accent)' : 'var(--bg-3)', color: row.serialMode !== 'custom' ? '#fff' : 'var(--text-2)' }}>
-              Sequential
-            </button>
-            <button type="button"
-              onClick={() => {
-                onUpdate(index, 'serialMode', 'custom');
-                const ex: string[] = Array.isArray(row.customSerials) ? row.customSerials : [];
-                onUpdate(index, 'customSerials', Array.from({ length: row.quantity }, (_, i) => ex[i] || ''));
-              }}
-              style={{ flex: 1, fontSize: 10, padding: '3px 4px', border: '1px solid var(--border)', borderRadius: 4, cursor: 'pointer', background: row.serialMode === 'custom' ? 'var(--accent)' : 'var(--bg-3)', color: row.serialMode === 'custom' ? '#fff' : 'var(--text-2)' }}>
-              Custom
-            </button>
-          </div>
-        )}
-        {row.quantity > 1 && row.serialMode !== 'custom' && row.serialNumber && (() => {
-          const preview = generateSequentialSerials(row.serialNumber, row.quantity);
-          return (
-            <div style={{ fontSize: 10, color: 'var(--text-3)', marginTop: 4, fontFamily: 'monospace', lineHeight: 1.4 }}>
-              {preview.slice(0, 3).join(', ')}{row.quantity > 3 ? `, … (${row.quantity})` : ''}
-            </div>
-          );
-        })()}
-        {row.quantity > 1 && row.serialMode === 'custom' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginTop: 4, maxHeight: 120, overflowY: 'auto', padding: 4, background: 'var(--bg-3)', borderRadius: 4 }}>
-            {Array.from({ length: row.quantity }, (_, i) => (
-              <input key={i} className="form-input"
-                style={{ fontSize: 11, padding: '3px 6px', fontFamily: 'monospace' }}
-                value={(row.customSerials && row.customSerials[i]) || ''}
-                onChange={e => {
-                  const next = Array.from({ length: row.quantity }, (_, j) =>
-                    j === i ? e.target.value : ((row.customSerials && row.customSerials[j]) || '')
-                  );
-                  onUpdate(index, 'customSerials', next);
+        {/* Serial Number with sequential/custom toggle */}
+        <td style={{ ...td, width: 130, borderTop: cellTop }}>
+          <input className="form-input"
+            style={{ fontSize: 12, fontFamily: 'monospace' }}
+            value={row.serialNumber || ''}
+            onChange={e => onUpdate(index, 'serialNumber', e.target.value)}
+            placeholder={row.quantity > 1 ? 'Base e.g. SN-001' : 'Serial No.'}
+          />
+          {row.quantity > 1 && (
+            <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
+              <button type="button"
+                onClick={() => onUpdate(index, 'serialMode', 'sequential')}
+                style={{ flex: 1, fontSize: 10, padding: '3px 4px', border: '1px solid var(--border)', borderRadius: 4, cursor: 'pointer', background: row.serialMode !== 'custom' ? 'var(--accent)' : 'var(--bg-3)', color: row.serialMode !== 'custom' ? '#fff' : 'var(--text-2)' }}>
+                Sequential
+              </button>
+              <button type="button"
+                onClick={() => {
+                  onUpdate(index, 'serialMode', 'custom');
+                  const ex: string[] = Array.isArray(row.customSerials) ? row.customSerials : [];
+                  onUpdate(index, 'customSerials', Array.from({ length: row.quantity }, (_, i) => ex[i] || ''));
                 }}
-                placeholder={`#${i + 1}`}
-              />
-            ))}
+                style={{ flex: 1, fontSize: 10, padding: '3px 4px', border: '1px solid var(--border)', borderRadius: 4, cursor: 'pointer', background: row.serialMode === 'custom' ? 'var(--accent)' : 'var(--bg-3)', color: row.serialMode === 'custom' ? '#fff' : 'var(--text-2)' }}>
+                Custom
+              </button>
+            </div>
+          )}
+          {row.quantity > 1 && row.serialMode !== 'custom' && row.serialNumber && (() => {
+            const preview = generateSequentialSerials(row.serialNumber, row.quantity);
+            return (
+              <div style={{ fontSize: 10, color: 'var(--text-3)', marginTop: 4, fontFamily: 'monospace', lineHeight: 1.4 }}>
+                {preview.slice(0, 3).join(', ')}{row.quantity > 3 ? `, … (${row.quantity})` : ''}
+              </div>
+            );
+          })()}
+          {row.quantity > 1 && row.serialMode === 'custom' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginTop: 4, maxHeight: 120, overflowY: 'auto', padding: 4, background: 'var(--bg-3)', borderRadius: 4 }}>
+              {Array.from({ length: row.quantity }, (_, i) => (
+                <input key={i} className="form-input"
+                  style={{ fontSize: 11, padding: '3px 6px', fontFamily: 'monospace' }}
+                  value={(row.customSerials && row.customSerials[i]) || ''}
+                  onChange={e => {
+                    const next = Array.from({ length: row.quantity }, (_, j) =>
+                      j === i ? e.target.value : ((row.customSerials && row.customSerials[j]) || '')
+                    );
+                    onUpdate(index, 'customSerials', next);
+                  }}
+                  placeholder={`#${i + 1}`}
+                />
+              ))}
+            </div>
+          )}
+        </td>
+
+        {/* Qty — must always stay visible, aligned to top so serial expansion never hides it */}
+        <td style={{ ...td, width: 60, verticalAlign: 'top', borderTop: cellTop }}>
+          <input className="form-input" type="number" min="1"
+            style={{ fontSize: 13, textAlign: 'center', minWidth: 55 }}
+            value={row.quantity}
+            onChange={e => {
+              const q = parseInt(e.target.value) || 1;
+              onUpdate(index, 'quantity', q);
+              if (q === 1) onUpdate(index, 'serialMode', 'single');
+              else if (row.serialMode === 'single') onUpdate(index, 'serialMode', 'sequential');
+            }}
+          />
+        </td>
+
+        {/* Remove */}
+        <td rowSpan={2} style={{ ...td, width: 32, textAlign: 'center', verticalAlign: 'middle', borderTop: cellTop }}>
+          <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red)', padding: 4 }} onClick={() => onRemove(index)}>
+            <Trash2 size={13} />
+          </button>
+        </td>
+      </tr>
+
+      {/* Row 2 — secondary fields, indented + lighter background */}
+      <tr style={{ background: 'var(--bg-3)' }}>
+        <td colSpan={5} style={{ ...td, paddingLeft: 14, paddingBottom: 10 }}>
+          <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+            <div style={{ minWidth: 110 }}>
+              <label style={subLabel}>Condition</label>
+              <select className="form-input" style={{ fontSize: 12 }} value={row.condition} onChange={e => onUpdate(index, 'condition', e.target.value)}>
+                {['new', 'good', 'fair', 'poor'].map(c => (
+                  <option key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</option>
+                ))}
+              </select>
+            </div>
+            <div style={{ minWidth: 100 }}>
+              <label style={subLabel}>Location</label>
+              <input className="form-input" style={{ fontSize: 12 }} value={row.location} onChange={e => onUpdate(index, 'location', e.target.value)} placeholder="A-3" />
+            </div>
+            <div style={{ flex: 1, minWidth: 160 }}>
+              <label style={subLabel}>Notes</label>
+              <input className="form-input" style={{ fontSize: 12 }} value={row.notes} onChange={e => onUpdate(index, 'notes', e.target.value)} placeholder="Notes" />
+            </div>
           </div>
-        )}
-      </td>
-
-      {/* Qty */}
-      <td style={{ ...td, width: 65, verticalAlign: 'middle' }}>
-        <input className="form-input" type="number" min="1"
-          style={{ fontSize: 13, textAlign: 'center' }}
-          value={row.quantity}
-          onChange={e => {
-            const q = parseInt(e.target.value) || 1;
-            onUpdate(index, 'quantity', q);
-            if (q === 1) onUpdate(index, 'serialMode', 'single');
-            else if (row.serialMode === 'single') onUpdate(index, 'serialMode', 'sequential');
-          }}
-        />
-      </td>
-
-      {/* Condition */}
-      <td style={{ ...td, width: 90, verticalAlign: 'middle' }}>
-        <select className="form-input" style={{ fontSize: 12 }} value={row.condition} onChange={e => onUpdate(index, 'condition', e.target.value)}>
-          {['new', 'good', 'fair', 'poor'].map(c => (
-            <option key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</option>
-          ))}
-        </select>
-      </td>
-
-      {/* Location */}
-      <td style={{ ...td, width: 80, verticalAlign: 'middle' }}>
-        <input className="form-input" style={{ fontSize: 12 }} value={row.location} onChange={e => onUpdate(index, 'location', e.target.value)} placeholder="A-3" />
-      </td>
-
-      {/* Notes */}
-      <td style={{ ...td, verticalAlign: 'middle' }}>
-        <input className="form-input" style={{ fontSize: 12 }} value={row.notes} onChange={e => onUpdate(index, 'notes', e.target.value)} placeholder="Notes" />
-      </td>
-
-      {/* Remove */}
-      <td style={{ ...td, width: 36, textAlign: 'center', verticalAlign: 'middle' }}>
-        <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red)', padding: 4 }} onClick={() => onRemove(index)}>
-          <Trash2 size={13} />
-        </button>
-      </td>
-    </tr>
+        </td>
+      </tr>
+    </>
   );
 }
 
@@ -382,6 +399,7 @@ const newRow = () => ({
 const thStyle: React.CSSProperties = {
   padding: '8px 10px', fontSize: 11, color: 'var(--text-3)',
   fontWeight: 600, textAlign: 'left', whiteSpace: 'nowrap', background: 'var(--bg-3)',
+  position: 'sticky', top: 0, zIndex: 2,
 };
 
 export default function InventoryPage() {
@@ -765,8 +783,9 @@ export default function InventoryPage() {
                                       <Edit2 size={13} />
                                     </button>
                                     <button className="btn btn-ghost btn-sm" onClick={() => { setStockTarget(item); setStockQty('1'); setStockDate(''); setStockScheme(''); }}>+ Stock</button>
-                                    {user?.role === 'admin' && (
-                                      <button className="btn btn-danger btn-sm btn-icon" onClick={() => { if (confirm(`Remove "${item.name}"?`)) deleteItem.mutate(item.id); }}>
+                                    {isManager && (
+                                      <button className="btn btn-danger btn-sm btn-icon" title="Permanently delete"
+                                        onClick={() => { if (confirm(`Permanently delete "${item.name}"? This cannot be undone.`)) deleteItem.mutate(item.id); }}>
                                         <Trash2 size={13} />
                                       </button>
                                     )}
@@ -819,16 +838,13 @@ export default function InventoryPage() {
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr>
-                <th style={thStyle}>#</th>
-                <th style={thStyle}>Product Name</th>
-                <th style={thStyle}>SKU</th>
-                <th style={thStyle}>Category</th>
-                <th style={thStyle}>Serial No.</th>
-                <th style={{ ...thStyle, textAlign: 'center' }}>Qty</th>
-                <th style={thStyle}>Condition</th>
-                <th style={thStyle}>Location</th>
-                <th style={thStyle}>Notes</th>
-                <th style={thStyle}></th>
+                <th style={{ ...thStyle, width: 28, textAlign: 'center' }}>#</th>
+                <th style={{ ...thStyle, minWidth: 200 }}>Product Name</th>
+                <th style={{ ...thStyle, width: 90 }}>SKU</th>
+                <th style={{ ...thStyle, width: 110 }}>Category</th>
+                <th style={{ ...thStyle, width: 130 }}>Serial No.</th>
+                <th style={{ ...thStyle, width: 60, textAlign: 'center' }}>Qty</th>
+                <th style={{ ...thStyle, width: 32 }}></th>
               </tr>
             </thead>
             <tbody>

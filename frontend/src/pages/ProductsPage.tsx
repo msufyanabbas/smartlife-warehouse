@@ -168,23 +168,30 @@ export default function ProductsPage() {
 
   const handleCreate = async () => {
     await createProduct.mutateAsync({
-      name: cName, sku: cSku,
-      description: cDesc || undefined, brand: cBrand || undefined,
-      model: cModel || undefined, unit: cUnit || undefined,
-      categoryId: cCat || undefined, notes: cNotes || undefined,
+      name: cName.trim(), sku: cSku.trim(),
+      description: cDesc.trim() === '' ? null : cDesc.trim(),
+      brand: cBrand.trim() === '' ? null : cBrand.trim(),
+      model: cModel.trim() === '' ? null : cModel.trim(),
+      unit: cUnit.trim() === '' ? null : cUnit.trim(),
+      categoryId: cCat || undefined,
+      notes: cNotes.trim() === '' ? null : cNotes.trim(),
     });
     setShowCreate(false);
   };
 
   const handleUpdate = async () => {
     if (!editTarget) return;
+    // Send empty strings as null (clears the field); only undefined is skipped.
     await updateProduct.mutateAsync({
       id: editTarget.id,
       data: {
-        name: eName, description: eDesc || undefined,
-        brand: eBrand || undefined, model: eModel || undefined,
-        unit: eUnit || undefined, categoryId: eCat || undefined,
-        notes: eNotes || undefined,
+        name: eName.trim(),
+        description: eDesc !== undefined ? (eDesc.trim() === '' ? null : eDesc.trim()) : undefined,
+        brand: eBrand !== undefined ? (eBrand.trim() === '' ? null : eBrand.trim()) : undefined,
+        model: eModel !== undefined ? (eModel.trim() === '' ? null : eModel.trim()) : undefined,
+        unit: eUnit !== undefined ? (eUnit.trim() === '' ? null : eUnit.trim()) : undefined,
+        categoryId: eCat || undefined,
+        notes: eNotes !== undefined ? (eNotes.trim() === '' ? null : eNotes.trim()) : undefined,
       },
     });
     setEditTarget(null);

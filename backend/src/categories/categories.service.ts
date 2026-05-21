@@ -14,7 +14,6 @@ export class CategoriesService {
   async findAll() {
     // Return tree structure: top-level categories with their children
     const all = await this.categoryRepository.find({
-      where: { isActive: true },
       relations: ['children'],
       order: { name: 'ASC' },
     });
@@ -25,7 +24,6 @@ export class CategoriesService {
   async findFlat() {
     // Return all categories flat for dropdowns
     return this.categoryRepository.find({
-      where: { isActive: true },
       relations: ['parent'],
       order: { name: 'ASC' },
     });
@@ -52,16 +50,21 @@ export class CategoriesService {
   }
 
   async update(id: string, dto: UpdateCategoryDto) {
-    const cat = await this.findOne(id);
-    Object.assign(cat, dto);
-    return this.categoryRepository.save(cat);
+    await this.findOne(id); // ensure it exists
+    // Direct SQL UPDATE — include empty strings (clear the field), skip only undefined
+    const updateData: any = {};
+    for (const [key, value] of Object.entries(dto)) {
+      if (value !== undefined) {
+        updateData[key] = value === '' ? null : value;
+      }
+    }
+    await this.categoryRepository.update(id, updateData);
+    return this.findOne(id);
   }
 
   async remove(id: string) {
-    const cat = await this.findOne(id);
-    // Check if any products use this category
-    cat.isActive = false;
-    await this.categoryRepository.save(cat);
+    await this.findOne(id); // ensure it exists
+    await this.categoryRepository.delete(id);
     return { message: 'Category removed' };
   }
 }

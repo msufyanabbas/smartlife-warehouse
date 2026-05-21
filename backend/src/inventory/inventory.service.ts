@@ -22,14 +22,13 @@ export class InventoryService {
 
   async findAll() {
     return this.itemRepository.find({
-      where: { isActive: true },
       order: { createdAt: 'DESC' },
     });
   }
 
   async findOne(id: string) {
     const item = await this.itemRepository.findOne({
-      where: { id, isActive: true },
+      where: { id },
     });
     if (!item) throw new NotFoundException(`Item ${id} not found`);
     return item;
@@ -82,9 +81,16 @@ export class InventoryService {
   }
 
   async update(id: string, dto: UpdateInventoryItemDto) {
-    const item = await this.findOne(id);
-    Object.assign(item, dto);
-    return this.itemRepository.save(item);
+    await this.findOne(id); // ensure it exists
+    // Direct SQL UPDATE — include empty strings (clear the field), skip only undefined
+    const updateData: any = {};
+    for (const [key, value] of Object.entries(dto)) {
+      if (value !== undefined) {
+        updateData[key] = value === '' ? null : value;
+      }
+    }
+    await this.itemRepository.update(id, updateData);
+    return this.findOne(id);
   }
 
 async addStock(id: string, dto: AddStockDto) {
@@ -119,13 +125,12 @@ async addStock(id: string, dto: AddStockDto) {
     if (item.assignedQuantity > 0) {
       throw new BadRequestException('Cannot delete item with active assignments');
     }
-    item.isActive = false;
-    await this.itemRepository.save(item);
+    await this.itemRepository.remove(item);
     return { message: 'Item removed successfully' };
   }
 
   async getStats() {
-    const items = await this.itemRepository.find({ where: { isActive: true } });
+    const items = await this.itemRepository.find();
     return {
       totalItems: items.length,
       totalStock: items.reduce((s, i) => s + i.totalQuantity, 0),

@@ -13,7 +13,9 @@ import { CreateUserDto, UpdateUserDto } from './dto/user.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Role } from '../common/enums/role.enum';
+import { User } from './entities/user.entity';
 
 @Controller('users')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -52,8 +54,8 @@ export class UsersController {
 
   @Delete(':id')
   @Roles(Role.ADMIN)
-  remove(@Param('id') id: string) {
-    return this.usersService.remove(id);
+  remove(@Param('id') id: string, @CurrentUser() user: User) {
+    return this.usersService.remove(id, user);
   }
 
   @Put(':id/deactivate')

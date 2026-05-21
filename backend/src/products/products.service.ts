@@ -12,14 +12,14 @@ export class ProductsService {
   ) {}
 
   async findAll(search?: string, categoryId?: string) {
-    const where: any = { isActive: true };
+    const where: any = {};
     if (categoryId) where.categoryId = categoryId;
 
     if (search) {
       return this.productRepository.find({
         where: [
-          { isActive: true, name: ILike(`%${search}%`) },
-          { isActive: true, sku: ILike(`%${search}%`) },
+          { name: ILike(`%${search}%`) },
+          { sku: ILike(`%${search}%`) },
         ],
         relations: ['category'],
         order: { name: 'ASC' },
@@ -38,8 +38,8 @@ export class ProductsService {
     // For auto-suggest — returns top 10 matches
     return this.productRepository.find({
       where: [
-        { isActive: true, name: ILike(`%${query}%`) },
-        { isActive: true, sku: ILike(`%${query}%`) },
+        { name: ILike(`%${query}%`) },
+        { sku: ILike(`%${query}%`) },
       ],
       relations: ['category'],
       order: { name: 'ASC' },
@@ -58,23 +58,33 @@ export class ProductsService {
 
   async findBySku(sku: string) {
     return this.productRepository.findOne({
-      where: { sku, isActive: true },
+      where: { sku },
       relations: ['category'],
     });
   }
 
   async create(dto: CreateProductDto) {
+    if (dto.sku) dto.sku = dto.sku.trim();
+    // SKU must be globally unique — check existence regardless of any flag
     const existing = await this.productRepository.findOne({ where: { sku: dto.sku } });
-    if (existing) throw new ConflictException(`Product with SKU "${dto.sku}" already exists`);
+    if (existing) throw new ConflictException('SKU already exists');
     const product = this.productRepository.create(dto);
     return this.productRepository.save(product);
   }
 
-async update(id: string, dto: UpdateProductDto) {
-  // Use repository.update() directly — no entity loading needed
-  await this.productRepository.update(id, dto);
-  return this.findOne(id); // reload with category relation
-}
+  async update(id: string, dto: UpdateProductDto) {
+    await this.findOne(id); // ensure it exists
+    if (dto.sku) dto.sku = dto.sku.trim();
+    // Direct SQL UPDATE — include empty strings (clear the field), skip only undefined
+    const updateData: any = {};
+    for (const [key, value] of Object.entries(dto)) {
+      if (value !== undefined) {
+        updateData[key] = value === '' ? null : value;
+      }
+    }
+    await this.productRepository.update(id, updateData);
+    return this.findOne(id); // reload with category relation
+  }
 
   async remove(id: string) {
     const product = await this.findOne(id);

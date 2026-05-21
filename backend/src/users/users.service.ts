@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   ConflictException,
+  BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -37,12 +38,22 @@ export class UsersService {
   }
 
   async update(id: string, dto: UpdateUserDto) {
-    const user = await this.findOne(id);
-    Object.assign(user, dto);
-    return this.userRepository.save(user);
+    await this.findOne(id); // ensure it exists
+    // Direct SQL UPDATE — include empty strings (clear the field), skip only undefined
+    const updateData: any = {};
+    for (const [key, value] of Object.entries(dto)) {
+      if (value !== undefined) {
+        updateData[key] = value === '' ? null : value;
+      }
+    }
+    await this.userRepository.update(id, updateData);
+    return this.findOne(id);
   }
 
-  async remove(id: string) {
+  async remove(id: string, currentUser: User) {
+    if (currentUser?.id === id) {
+      throw new BadRequestException('You cannot delete your own account');
+    }
     const user = await this.findOne(id);
     await this.userRepository.remove(user);
     return { message: 'User deleted successfully' };

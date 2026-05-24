@@ -431,6 +431,7 @@ export default function InventoryPage() {
   const [stockDate, setStockDate] = useState('');
   const [stockScheme, setStockScheme] = useState('');
   const [expandedSchemes, setExpandedSchemes] = useState<Set<string>>(new Set());
+  const [compactView, setCompactView] = useState(false);
 
   // ── Edit modal state ──────────────────────────────────────────────────────
   const [editTarget, setEditTarget] = useState<InventoryItem | null>(null);
@@ -622,7 +623,7 @@ export default function InventoryPage() {
   const today = new Date().toISOString().split('T')[0];
 
   return (
-    <div className="page">
+    <div className="page" style={{ overflowX: 'hidden' }}>
       <div className="page-header flex items-center justify-between">
         <div>
           <h1>Inventory</h1>
@@ -632,6 +633,9 @@ export default function InventoryPage() {
           </p>
         </div>
         <div className="flex gap-2">
+          <button className="btn btn-ghost btn-sm" onClick={() => setCompactView(v => !v)}>
+            {compactView ? 'Show All Columns' : 'Compact View'}
+          </button>
           <button className="btn btn-ghost" onClick={exportExcel}>
             <Download size={14} /> Export{selectedIds.size > 0 ? ` (${selectedIds.size})` : ' All'}
           </button>
@@ -699,7 +703,7 @@ export default function InventoryPage() {
           {!hasFilters && <p style={{ fontSize: 13, color: 'var(--text-3)', marginTop: 8 }}>Click "Add Inventory" to start adding items by scheme</p>}
         </div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, overflowX: 'auto' }}>
           {grouped.map(({ schemeNo: sNo, projectName: pName, items: groupItems }) => {
             const key = `${sNo}||${pName}`;
             const expanded = expandedSchemes.has(key);
@@ -712,41 +716,41 @@ export default function InventoryPage() {
 
             return (
               <div key={key} className="card" style={{ padding: 0, overflow: 'hidden' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '13px 18px', borderBottom: expanded ? '1px solid var(--border)' : 'none', cursor: 'pointer' }}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '13px 18px', borderBottom: expanded ? '1px solid var(--border)' : 'none', cursor: 'pointer', flexWrap: 'nowrap', overflow: 'hidden' }}
                   onClick={() => toggleScheme(key)}>
                   <input type="checkbox" checked={allSel}
                     ref={el => { if (el) el.indeterminate = someSel && !allSel; }}
                     onChange={e => { e.stopPropagation(); toggleSelectScheme(groupItems); }}
-                    onClick={e => e.stopPropagation()} style={{ cursor: 'pointer' }} />
+                    onClick={e => e.stopPropagation()} style={{ cursor: 'pointer', flexShrink: 0 }} />
                   <ChevronDown size={15} style={{ color: 'var(--text-3)', flexShrink: 0, transform: expanded ? 'rotate(0)' : 'rotate(-90deg)', transition: 'transform 0.15s' }} />
-                  <div style={{ flex: 1 }}>
-                    <span style={{ fontWeight: 700, fontSize: 15 }}>{sNo}</span>
-                    <span style={{ fontSize: 12, color: 'var(--text-3)', marginLeft: 10 }}>{pName}</span>
+                  <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'baseline', overflow: 'hidden' }}>
+                    <span style={{ fontWeight: 700, fontSize: 15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 200 }}>{sNo}</span>
+                    <span style={{ fontSize: 12, color: 'var(--text-3)', marginLeft: 10, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 160 }}>{pName}</span>
                   </div>
-                  <span className="badge badge-blue">{groupItems.length} item{groupItems.length !== 1 ? 's' : ''}</span>
-                  <span style={{ fontSize: 13, fontWeight: 700, color: stockColor }}>{availQty}/{totalQty}</span>
-                  <span style={{ fontSize: 11, color: 'var(--text-3)' }}>available</span>
+                  <span className="badge badge-blue" style={{ flexShrink: 0 }}>{groupItems.length} item{groupItems.length !== 1 ? 's' : ''}</span>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: stockColor, flexShrink: 0 }}>{availQty}/{totalQty}</span>
+                  <span style={{ fontSize: 11, color: 'var(--text-3)', flexShrink: 0 }}>available</span>
                 </div>
 
                 {expanded && (
-                  <div className="table-wrap" style={{ margin: 0, borderRadius: 0 }}>
-                    <table>
+                  <div className="table-wrap" style={{ margin: 0, borderRadius: 0, overflowX: 'auto' }}>
+                    <table style={{ minWidth: compactView ? 900 : 1100 }}>
                       <thead>
                         <tr>
                           <th style={{ width: 36, textAlign: 'center' }}></th>
-                          <th>Product</th>
-                          <th>SKU</th>
-                          <th>Serial No.</th>
-                          <th>Purchase Order</th>
-                          <th>Category</th>
-                          <th style={{ textAlign: 'center' }}>Total</th>
-                          <th style={{ textAlign: 'center' }}>Avail.</th>
-                          <th style={{ textAlign: 'center' }}>Assigned</th>
-                          <th style={{ textAlign: 'center' }}>Used</th>
-                          <th>Condition</th>
-                          <th>Location</th>
-                          <th>Received</th>
-                          {isManager && <th>Actions</th>}
+                          <th style={{ minWidth: 160 }}>Product</th>
+                          <th style={{ whiteSpace: 'nowrap', width: 90 }}>SKU</th>
+                          {!compactView && <th style={{ whiteSpace: 'nowrap', width: 100 }}>Serial No.</th>}
+                          {!compactView && <th style={{ whiteSpace: 'nowrap', width: 100 }}>Purchase Order</th>}
+                          <th style={{ whiteSpace: 'nowrap', width: 100 }}>Category</th>
+                          <th style={{ whiteSpace: 'nowrap', width: 55, textAlign: 'center' }}>Total</th>
+                          <th style={{ whiteSpace: 'nowrap', width: 55, textAlign: 'center' }}>Avail.</th>
+                          <th style={{ whiteSpace: 'nowrap', width: 65, textAlign: 'center' }}>Assigned</th>
+                          <th style={{ whiteSpace: 'nowrap', width: 50, textAlign: 'center' }}>Used</th>
+                          <th style={{ whiteSpace: 'nowrap', width: 75 }}>Condition</th>
+                          <th style={{ whiteSpace: 'nowrap', width: 75 }}>Location</th>
+                          <th style={{ whiteSpace: 'nowrap', width: 90 }}>Received</th>
+                          {isManager && <th style={{ whiteSpace: 'nowrap', width: 120 }}>Actions</th>}
                         </tr>
                       </thead>
                       <tbody>
@@ -756,28 +760,46 @@ export default function InventoryPage() {
                           const receivedDate = item.receivedAt || item.createdAt;
                           return (
                             <tr key={item.id} style={{ background: selectedIds.has(item.id) ? 'var(--accent-dim)' : undefined }}>
-                              <td style={{ textAlign: 'center' }}>
+                              <td style={{ width: 36, textAlign: 'center' }}>
                                 <input type="checkbox" checked={selectedIds.has(item.id)} onChange={() => toggleSelectItem(item.id)} style={{ cursor: 'pointer' }} />
                               </td>
-                              <td>
-                                <div style={{ fontWeight: 500 }}>{item.name}</div>
-                                {item.description && <div style={{ fontSize: 11, color: 'var(--text-3)' }}>{item.description}</div>}
+                              <td style={{ minWidth: 140, maxWidth: 200 }}>
+                                <div style={{ fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 190 }}>
+                                  {item.name}
+                                </div>
+                                {item.description && (
+                                  <div style={{ fontSize: 11, color: 'var(--text-3)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 190 }}>
+                                    {item.description}
+                                  </div>
+                                )}
                               </td>
-                              <td><code style={{ fontSize: 11, background: 'var(--bg-3)', padding: '2px 6px', borderRadius: 4, color: 'var(--accent)' }}>{item.sku}</code></td>
-                              <td style={{ fontSize: 12, color: 'var(--text-2)', fontFamily: 'monospace' }}>{item.serialNumber || '—'}</td>
-                              <td style={{ fontSize: 12, color: 'var(--text-2)' }}>{item.purchaseOrder || '—'}</td>
-                              <td style={{ fontSize: 12, color: 'var(--text-2)' }}>{item.category || '—'}</td>
-                              <td style={{ textAlign: 'center', fontWeight: 600 }}>{item.totalQuantity}</td>
-                              <td style={{ textAlign: 'center', fontWeight: 700, color: ac }}>{item.availableQuantity}</td>
-                              <td style={{ textAlign: 'center', color: 'var(--yellow)' }}>{item.assignedQuantity}</td>
-                              <td style={{ textAlign: 'center', color: 'var(--purple)' }}>{item.usedQuantity}</td>
-                              <td><span className={`badge badge-${item.condition === 'new' ? 'green' : item.condition === 'good' ? 'blue' : item.condition === 'fair' ? 'yellow' : 'red'}`}>{item.condition}</span></td>
-                              <td style={{ fontSize: 12, color: 'var(--text-2)' }}>{item.location || '—'}</td>
-                              <td style={{ fontSize: 12, color: 'var(--text-2)', whiteSpace: 'nowrap' }}>
+                              <td style={{ width: 90 }}><code style={{ fontSize: 11, background: 'var(--bg-3)', padding: '2px 6px', borderRadius: 4, color: 'var(--accent)' }}>{item.sku}</code></td>
+                              {!compactView && (
+                                <td style={{ fontSize: 12, color: 'var(--text-2)', fontFamily: 'monospace', width: 100, maxWidth: 100, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                  {item.serialNumber || '—'}
+                                </td>
+                              )}
+                              {!compactView && (
+                                <td style={{ fontSize: 12, color: 'var(--text-2)', width: 100, maxWidth: 100, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                  {item.purchaseOrder || '—'}
+                                </td>
+                              )}
+                              <td style={{ fontSize: 12, color: 'var(--text-2)', width: 100, maxWidth: 100, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {item.category || '—'}
+                              </td>
+                              <td style={{ width: 55, textAlign: 'center', fontWeight: 600 }}>{item.totalQuantity}</td>
+                              <td style={{ width: 55, textAlign: 'center', fontWeight: 700, color: ac }}>{item.availableQuantity}</td>
+                              <td style={{ width: 65, textAlign: 'center', color: 'var(--yellow)' }}>{item.assignedQuantity}</td>
+                              <td style={{ width: 50, textAlign: 'center', color: 'var(--purple)' }}>{item.usedQuantity}</td>
+                              <td style={{ width: 75 }}><span className={`badge badge-${item.condition === 'new' ? 'green' : item.condition === 'good' ? 'blue' : item.condition === 'fair' ? 'yellow' : 'red'}`}>{item.condition}</span></td>
+                              <td style={{ fontSize: 12, color: 'var(--text-2)', width: 75, maxWidth: 75, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {item.location || '—'}
+                              </td>
+                              <td style={{ fontSize: 12, color: 'var(--text-2)', whiteSpace: 'nowrap', width: 90 }}>
                                 {receivedDate ? format(new Date(receivedDate), 'dd MMM yyyy') : '—'}
                               </td>
                               {isManager && (
-                                <td>
+                                <td style={{ width: 120 }}>
                                   <div className="flex gap-2">
                                     <button className="btn btn-ghost btn-sm btn-icon" onClick={() => openEdit(item)} title="Edit">
                                       <Edit2 size={13} />

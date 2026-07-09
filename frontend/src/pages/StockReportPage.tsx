@@ -3,6 +3,7 @@ import * as XLSX from 'xlsx';
 import { BarChart2, Download, Search, Filter } from 'lucide-react';
 import { format, startOfMonth, endOfMonth, subMonths } from 'date-fns';
 import { useInventory, useItemUsage, useAssignments } from '../hooks/useApi';
+import AssignedUsedReport from './AssignedUsedReport';
 
 interface InventoryItem {
   id: string; name: string; sku: string; schemeNo?: string; projectName?: string;
@@ -38,7 +39,38 @@ const QUICK_RANGES = [
   { label: 'This Year', getValue: () => ({ from: `${new Date().getFullYear()}-01-01`, to: `${new Date().getFullYear()}-12-31` }) },
 ];
 
+type ReportTab = 'movement' | 'assigned-used';
+
 export default function StockReportPage() {
+  const [tab, setTab] = useState<ReportTab>('movement');
+
+  const tabButton = (value: ReportTab, label: string) => (
+    <button
+      className={`btn btn-sm ${tab === value ? 'btn-primary' : 'btn-ghost'}`}
+      onClick={() => setTab(value)}
+    >
+      {label}
+    </button>
+  );
+
+  return (
+    <div className="page">
+      <div className="page-header">
+        <h1>Reports</h1>
+        <p>Stock movement and assigned / used item history</p>
+      </div>
+
+      <div className="flex gap-2" style={{ marginBottom: 20 }}>
+        {tabButton('movement', 'Stock Movement')}
+        {tabButton('assigned-used', 'Assigned & Used Items')}
+      </div>
+
+      {tab === 'movement' ? <StockMovementReport /> : <AssignedUsedReport />}
+    </div>
+  );
+}
+
+function StockMovementReport() {
   const { data: items = [] } = useInventory();
   const { data: usageData = [] } = useItemUsage();
   const { data: assignments = [] } = useAssignments();
@@ -178,15 +210,12 @@ export default function StockReportPage() {
   );
 
   return (
-    <div className="page">
-      <div className="page-header flex items-center justify-between">
-        <div>
-          <h1>Stock Report</h1>
-          <p>
-            {dateFrom ? format(new Date(dateFrom), 'dd MMM yyyy') : 'All time'} → {dateTo ? format(new Date(dateTo), 'dd MMM yyyy') : 'today'}
-            {' · '}{reportRows.length} items
-          </p>
-        </div>
+    <div>
+      <div className="flex items-center justify-between" style={{ marginBottom: 16 }}>
+        <p className="text-muted text-sm">
+          {dateFrom ? format(new Date(dateFrom), 'dd MMM yyyy') : 'All time'} → {dateTo ? format(new Date(dateTo), 'dd MMM yyyy') : 'today'}
+          {' · '}{reportRows.length} items
+        </p>
         <button className="btn btn-ghost" onClick={exportExcel}>
           <Download size={14} /> Export Excel
         </button>

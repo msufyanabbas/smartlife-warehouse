@@ -14,6 +14,9 @@ import { ReturnRequestsModule } from './return-requests/return-requests.module';
 import { ItemRequestsModule } from './item-requests/item-requests.module';
 import { CategoriesModule } from './categories/categories.module';
 import { ProductsModule } from './products/products.module';
+import { GrnModule } from './grn/grn.module';
+import { AssignmentFormsModule } from './assignment-forms/assignment-forms.module';
+import { TransferFormsModule } from './transfer-forms/transfer-forms.module';
 
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
@@ -38,6 +41,9 @@ import { TransformInterceptor } from './common/interceptors/transform.intercepto
     ItemUsageModule,
     ReturnRequestsModule,
     ItemRequestsModule,
+    GrnModule,
+    AssignmentFormsModule,
+    TransferFormsModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: JwtAuthGuard },

@@ -1,0 +1,24 @@
+export default function DocumentHeader({ title, refLabel, refNumber }: {
+  title: string;
+  refLabel: string;
+  refNumber?: string;
+}) {
+  return (
+    <>
+      <div className="doc-header">
+        <div className="doc-header-brand">
+          <img src="/smartlife.png" alt="Smart Life Contracting Company" className="doc-logo" />
+          <div>
+            <div className="doc-company">Smart Life Contracting Company</div>
+            <div className="doc-company-sub">Warehouse &amp; Inventory Management</div>
+          </div>
+        </div>
+        <div className="doc-header-ref">
+          <div className="doc-ref-label">{refLabel}</div>
+          <div className="doc-ref-value">{refNumber || 'Auto-generated'}</div>
+        </div>
+      </div>
+      <h2 className="doc-title">{title}</h2>
+    </>
+  );
+}

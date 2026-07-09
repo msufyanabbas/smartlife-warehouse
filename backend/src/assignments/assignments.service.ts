@@ -5,8 +5,9 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { Assignment, AssignmentStatus } from './entities/assignment.entity';
+import { ItemUsage } from '../item-usage/entities/item-usage.entity';
 import { InventoryService } from '../inventory/inventory.service';
 import { CreateAssignmentDto, ReturnAssignmentDto } from './dto/assignment.dto';
 import { User } from '../users/entities/user.entity';
@@ -17,6 +18,8 @@ export class AssignmentsService {
   constructor(
     @InjectRepository(Assignment)
     private assignmentRepository: Repository<Assignment>,
+    @InjectRepository(ItemUsage)
+    private usageRepository: Repository<ItemUsage>,
     private inventoryService: InventoryService,
   ) {}
 
@@ -117,6 +120,59 @@ export class AssignmentsService {
       where: { status: AssignmentStatus.ACTIVE },
       relations: ['item', 'assignedTo'],
       order: { createdAt: 'DESC' },
+    });
+  }
+
+  /**
+   * Flattened Assigned/Used report: every assignment joined with its inventory
+   * item (for serial number / site ID) and its usage log entries.
+   */
+  async getReport() {
+    const assignments = await this.assignmentRepository.find({
+      relations: ['item', 'assignedTo'],
+      order: { createdAt: 'DESC' },
+    });
+    if (!assignments.length) return [];
+
+    const usages = await this.usageRepository.find({
+      where: { assignmentId: In(assignments.map(a => a.id)) },
+    });
+
+    const usageByAssignment = new Map<string, ItemUsage[]>();
+    for (const usage of usages) {
+      const bucket = usageByAssignment.get(usage.assignmentId) ?? [];
+      bucket.push(usage);
+      usageByAssignment.set(usage.assignmentId, bucket);
+    }
+
+    return assignments.map(a => {
+      const related = usageByAssignment.get(a.id) ?? [];
+      const qtyUsed = related.reduce((sum, u) => sum + u.quantityUsed, 0);
+
+      let status: 'assigned' | 'used' | 'returned' = 'assigned';
+      if (a.status === AssignmentStatus.RETURNED) status = 'returned';
+      else if (qtyUsed > 0) status = 'used';
+
+      return {
+        id: a.id,
+        itemId: a.itemId,
+        itemName: a.item?.name ?? '',
+        sku: a.item?.sku ?? '',
+        serialNumber: a.item?.serialNumber ?? '',
+        category: a.item?.category ?? '',
+        schemeNo: a.item?.schemeNo ?? '',
+        assignedToId: a.assignedToId,
+        assignedToName: a.assignedTo
+          ? `${a.assignedTo.firstName} ${a.assignedTo.lastName}`
+          : '',
+        qtyAssigned: a.quantity,
+        qtyUsed,
+        taskNos: [...new Set(related.map(u => u.taskNo).filter(Boolean))],
+        projectSite: related[0]?.projectName || a.item?.projectName || '',
+        assignmentDate: a.createdAt,
+        returnedAt: a.returnedAt ?? null,
+        status,
+      };
     });
   }
 }

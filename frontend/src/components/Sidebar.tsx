@@ -3,7 +3,7 @@ import {
   LayoutDashboard, Package, Users, ClipboardList,
   ArrowLeftRight, LogOut, Activity, RotateCcw, ShoppingCart,
   Tag, FolderOpen,
-  BarChart,
+  BarChart, FileText,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import ThemeToggle from './ThemeToggle';
@@ -129,6 +129,19 @@ export default function Sidebar() {
 
         {isManager && (
           <>
+            <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-3)', padding: '16px 16px 8px', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+              Documents
+            </div>
+            <NavLink to="/forms/grn" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+              <FileText size={16} /> GRN (Goods Receipt)
+            </NavLink>
+            <NavLink to="/forms/assignments" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+              <ClipboardList size={16} /> Assignment Forms
+            </NavLink>
+            <NavLink to="/forms/transfers" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+              <ArrowLeftRight size={16} /> Transfer Forms
+            </NavLink>
+
             <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-3)', padding: '16px 16px 8px', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
               Catalog
             </div>

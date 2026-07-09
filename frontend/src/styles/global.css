@@ -352,3 +352,132 @@ select.form-input option { background: var(--bg-3); }
 
 .theme-toggle-btn:hover { color: var(--text); background: var(--bg-4); }
 .theme-toggle-btn.active { background: var(--bg-2); color: var(--accent); box-shadow: 0 1px 4px rgba(0,0,0,0.15); }
+
+/* ── Printable documents ─────────────────────────────────────────────────── */
+/* Documents render as white paper in both themes so the screen matches print. */
+.doc-paper {
+  background: #ffffff;
+  color: #111827;
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: 30px 34px 24px;
+  border: 1px solid #d5d9e2;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+}
+
+.doc-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; }
+.doc-header-brand { display: flex; align-items: center; gap: 12px; }
+.doc-logo {
+  width: 64px; height: 40px; object-fit: contain;
+  border: 1px solid #e2e5ec; border-radius: 8px; padding: 3px; background: #fff;
+}
+.doc-company { font-family: var(--font-display); font-size: 17px; font-weight: 800; color: #0f172a; line-height: 1.2; }
+.doc-company-sub { font-size: 11px; color: #64748b; letter-spacing: 0.06em; text-transform: uppercase; margin-top: 2px; }
+.doc-header-ref { text-align: right; min-width: 190px; }
+.doc-ref-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: #64748b; }
+.doc-ref-value { font-family: var(--font-display); font-size: 20px; font-weight: 800; color: #b91c1c; letter-spacing: 0.02em; }
+
+.doc-title {
+  font-family: var(--font-display);
+  font-size: 22px; font-weight: 800; letter-spacing: 0.14em;
+  text-align: center; color: #0f172a;
+  margin: 16px 0 18px; padding: 8px 0;
+  border-top: 2px solid #0f172a; border-bottom: 2px solid #0f172a;
+}
+
+.doc-field { display: flex; flex-direction: column; gap: 3px; }
+.doc-field-label { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #475569; }
+.doc-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px 20px; margin-bottom: 18px; }
+.doc-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 28px; }
+.doc-panel { border: 1px solid #cbd5e1; border-radius: 8px; padding: 12px 14px; }
+.doc-panel-title { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; color: #0f172a; margin-bottom: 10px; }
+
+.doc-paper .doc-input,
+.doc-paper select.doc-input,
+.doc-paper textarea.doc-input {
+  width: 100%;
+  background: transparent;
+  color: #111827;
+  border: none;
+  border-bottom: 1px solid #94a3b8;
+  border-radius: 0;
+  padding: 4px 2px;
+  font-size: 12.5px;
+  font-family: var(--font-body);
+}
+.doc-paper .doc-input:focus { outline: none; border-bottom-color: var(--accent); }
+.doc-paper .doc-input:disabled,
+.doc-paper .doc-input[readonly] { color: #111827; opacity: 1; cursor: default; }
+.doc-paper select.doc-input option { background: #fff; color: #111827; }
+.doc-paper textarea.doc-input {
+  border: 1px solid #cbd5e1; border-radius: 6px; padding: 8px 10px;
+  resize: vertical; min-height: 62px;
+}
+
+/* Line items table */
+.doc-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.doc-table thead th {
+  background: #eef2f7; color: #0f172a;
+  border: 1px solid #94a3b8;
+  padding: 6px 6px;
+  font-size: 10.5px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.03em;
+  text-align: center;
+}
+.doc-table tbody td {
+  border: 1px solid #94a3b8;
+  padding: 0; height: 30px;
+  color: #111827; font-size: 12px;
+}
+.doc-table tbody tr { border: none; }
+.doc-table tbody tr:hover { background: transparent; }
+.doc-table tbody td.doc-cell-num { text-align: center; font-size: 11px; color: #475569; padding: 0 4px; }
+.doc-table .doc-input { border: none; padding: 5px 7px; }
+.doc-table .doc-input:focus { background: #eff6ff; }
+.doc-table tfoot td {
+  border: 1px solid #94a3b8;
+  background: #eef2f7;
+  padding: 7px 8px;
+  font-size: 12px; font-weight: 800; color: #0f172a;
+}
+.doc-row-remove {
+  background: none; border: none; color: #cbd5e1;
+  display: flex; align-items: center; justify-content: center;
+  width: 100%; padding: 4px 0;
+}
+.doc-row-remove:hover { color: var(--red); }
+
+/* Signature footer */
+.doc-signatures { display: grid; gap: 26px; margin-top: 30px; }
+.doc-sign-line { border-top: 1px solid #334155; padding-top: 6px; }
+.doc-sign-label { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #334155; }
+.doc-sign-hint { font-size: 10px; color: #94a3b8; margin-top: 1px; }
+
+/* Status badges scoped to documents (readable on white paper) */
+.doc-badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 10px; border-radius: 99px;
+  font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+}
+
+/* Print: only the document survives */
+@media print {
+  .sidebar, .nav, .no-print { display: none !important; }
+  .print-doc { width: 100%; }
+  body { background: white; }
+
+  html, body, #root { height: auto; background: #fff; }
+  .app-shell { display: block; height: auto; overflow: visible; }
+  .main-content { display: block; overflow: visible; background: #fff; }
+  .page { padding: 0; }
+  .doc-paper {
+    max-width: none; margin: 0; padding: 0;
+    border: none; border-radius: 0; box-shadow: none;
+  }
+  .doc-paper .doc-input { border-bottom-color: #475569; }
+  .doc-table { page-break-inside: auto; }
+  .doc-table tr { page-break-inside: avoid; }
+  .doc-signatures { page-break-inside: avoid; }
+  @page { size: A4 portrait; margin: 12mm; }
+}

@@ -124,6 +124,119 @@ export interface ReturnRequest {
   updatedAt: string;
 }
 
+// ── Document forms ─────────────────────────────────────────────────────────
+export interface GrnDocument {
+  id: string;
+  grnNo: string;
+  supplierName?: string;
+  purchaseOrderNo?: string;
+  dateOfReceipt?: string;
+  deliveryNoteNo?: string;
+  location?: string;
+  receivedBy?: User;
+  receivedById?: string;
+  projectName?: string;
+  schemeNo?: string;
+  conditionOnArrival: 'Good' | 'Damaged' | 'Partial' | 'Rejected';
+  notes?: string;
+  status: 'draft' | 'completed';
+  items: GrnLineItem[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GrnLineItem {
+  itemCode: string;
+  itemDescription: string;
+  unit: string;
+  orderedQty: number;
+  receivedQty: number;
+  serialNumber: string;
+  productId?: string;
+}
+
+export interface AssignmentForm {
+  id: string;
+  assignmentNo: string;
+  date?: string;
+  priority: 'Normal' | 'High' | 'Urgent';
+  requestedBy?: User;
+  requestedById?: string;
+  department?: string;
+  projectSite?: string;
+  purposeDescription?: string;
+  assignedTo?: User;
+  assignedToId?: string;
+  notes?: string;
+  status: 'draft' | 'approved' | 'issued';
+  items: AssignmentFormLineItem[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AssignmentFormLineItem {
+  itemCode: string;
+  itemDescription: string;
+  unit: string;
+  stockAvailable: number;
+  qtyRequested: number;
+  qtyApproved: number;
+  qtyIssued: number;
+  serialNumber: string;
+  itemId?: string;
+}
+
+export interface TransferForm {
+  id: string;
+  transferNo: string;
+  fromWarehouse?: string;
+  fromProjectSite?: string;
+  issuedBy?: User;
+  issuedById?: string;
+  transferDate?: string;
+  toWarehouse?: string;
+  toProjectSite?: string;
+  receivedBy?: User;
+  receivedById?: string;
+  reasonForTransfer?: string;
+  approvedBy?: User;
+  approvedById?: string;
+  notes?: string;
+  status: 'draft' | 'approved' | 'completed';
+  items: TransferFormLineItem[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TransferFormLineItem {
+  itemCode: string;
+  itemDescription: string;
+  unit: string;
+  stockQty: number;
+  qtyToTransfer: number;
+  serialNumber: string;
+  itemId?: string;
+}
+
+export interface AssignedUsedReportRow {
+  id: string;
+  itemId: string;
+  itemName: string;
+  sku: string;
+  serialNumber: string;
+  category: string;
+  schemeNo: string;
+  assignedToId: string;
+  assignedToName: string;
+  qtyAssigned: number;
+  qtyUsed: number;
+  taskNos: string[];
+  projectSite: string;
+  assignmentDate: string;
+  returnedAt: string | null;
+  status: 'assigned' | 'used' | 'returned';
+}
+
 export type ItemRequestStatus = 'pending' | 'approved' | 'rejected' | 'cancelled';
 
 export interface ItemRequest {

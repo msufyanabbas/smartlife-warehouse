@@ -15,6 +15,9 @@ import ReturnRequestsPage from './pages/ReturnRequestsPage';
 import ItemRequestsPage from './pages/ItemRequestsPage';
 import CategoriesPage from './pages/CategoriesPage';
 import ProductsPage from './pages/ProductsPage';
+import GrnFormPage from './pages/forms/GrnFormPage';
+import AssignmentFormPage from './pages/forms/AssignmentFormPage';
+import TransferFormPage from './pages/forms/TransferFormPage';
 import './styles/global.css';
 import StockReportPage from './pages/StockReportPage';
 
@@ -39,6 +42,9 @@ export default function App() {
                 <Route path="/returns" element={<ReturnRequestsPage />} />
                 <Route path="/usage" element={<UsagePage />} />
                 <Route path="/stock-report" element={<RequireRole roles={['admin', 'manager']}><StockReportPage /></RequireRole>} />
+                <Route path="/forms/grn" element={<RequireRole roles={['admin', 'manager']}><GrnFormPage /></RequireRole>} />
+                <Route path="/forms/assignments" element={<RequireRole roles={['admin', 'manager']}><AssignmentFormPage /></RequireRole>} />
+                <Route path="/forms/transfers" element={<RequireRole roles={['admin', 'manager']}><TransferFormPage /></RequireRole>} />
               <Route path="/categories" element={<RequireRole roles={['admin', 'manager']}><CategoriesPage /></RequireRole>} />
               <Route path="/products" element={<RequireRole roles={['admin', 'manager']}><ProductsPage /></RequireRole>} />
                 <Route path="/users" element={

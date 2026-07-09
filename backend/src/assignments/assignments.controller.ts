@@ -42,6 +42,13 @@ export class AssignmentsController {
     return this.assignmentsService.getWorkerInventory(user.id);
   }
 
+  // Declared before `:id` so "report" is not swallowed as an assignment id
+  @Get('report')
+  @Roles(Role.ADMIN, Role.MANAGER)
+  getReport() {
+    return this.assignmentsService.getReport();
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.assignmentsService.findOne(id);

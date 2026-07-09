@@ -445,3 +445,110 @@ export const useDeleteProduct = () => {
     onError: (e: any) => toast.error(e.response?.data?.message || 'Failed'),
   });
 };
+
+// ── Assigned / Used Report ─────────────────────────────────────────────────
+export const useAssignedUsedReport = () =>
+  useQuery({
+    queryKey: ['assigned-used-report'],
+    queryFn: () => api.get('/assignments/report').then(r => r.data.data),
+  });
+
+// ── Document forms (GRN / Assignment / Transfer) ───────────────────────────
+// All three modules expose the same REST shape; the shared bodies below keep
+// the hooks themselves thin while staying lint-legal call sites.
+const listDocuments = (resource: string) => api.get(`/${resource}`).then(r => r.data.data);
+const getDocument = (resource: string, id?: string) => api.get(`/${resource}/${id}`).then(r => r.data.data);
+
+const onDocumentSaved = (qc: ReturnType<typeof useQueryClient>, resource: string, message: string) => {
+  qc.invalidateQueries({ queryKey: [resource] });
+  qc.invalidateQueries({ queryKey: ['inventory'] });
+  toast.success(message);
+};
+
+const documentError = (fallback: string) => (e: any) =>
+  toast.error(e.response?.data?.message || fallback);
+
+// GRN
+export const useGrnList = () =>
+  useQuery({ queryKey: ['grn'], queryFn: () => listDocuments('grn') });
+
+export const useGrn = (id?: string) =>
+  useQuery({ queryKey: ['grn', id], queryFn: () => getDocument('grn', id), enabled: !!id });
+
+export const useCreateGrn = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: any) => api.post('/grn', data).then(r => r.data.data),
+    onSuccess: () => onDocumentSaved(qc, 'grn', 'GRN created'),
+    onError: documentError('Failed to create GRN'),
+  });
+};
+
+export const useUpdateGrn = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: any }) => api.put(`/grn/${id}`, data).then(r => r.data.data),
+    onSuccess: () => onDocumentSaved(qc, 'grn', 'GRN saved'),
+    onError: documentError('Failed to save GRN'),
+  });
+};
+
+// Assignment forms
+export const useAssignmentForms = () =>
+  useQuery({ queryKey: ['assignment-forms'], queryFn: () => listDocuments('assignment-forms') });
+
+export const useAssignmentForm = (id?: string) =>
+  useQuery({
+    queryKey: ['assignment-forms', id],
+    queryFn: () => getDocument('assignment-forms', id),
+    enabled: !!id,
+  });
+
+export const useCreateAssignmentForm = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: any) => api.post('/assignment-forms', data).then(r => r.data.data),
+    onSuccess: () => onDocumentSaved(qc, 'assignment-forms', 'Assignment form created'),
+    onError: documentError('Failed to create assignment form'),
+  });
+};
+
+export const useUpdateAssignmentForm = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: any }) =>
+      api.put(`/assignment-forms/${id}`, data).then(r => r.data.data),
+    onSuccess: () => onDocumentSaved(qc, 'assignment-forms', 'Assignment form saved'),
+    onError: documentError('Failed to save assignment form'),
+  });
+};
+
+// Transfer forms
+export const useTransferForms = () =>
+  useQuery({ queryKey: ['transfer-forms'], queryFn: () => listDocuments('transfer-forms') });
+
+export const useTransferForm = (id?: string) =>
+  useQuery({
+    queryKey: ['transfer-forms', id],
+    queryFn: () => getDocument('transfer-forms', id),
+    enabled: !!id,
+  });
+
+export const useCreateTransferForm = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: any) => api.post('/transfer-forms', data).then(r => r.data.data),
+    onSuccess: () => onDocumentSaved(qc, 'transfer-forms', 'Transfer form created'),
+    onError: documentError('Failed to create transfer form'),
+  });
+};
+
+export const useUpdateTransferForm = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: any }) =>
+      api.put(`/transfer-forms/${id}`, data).then(r => r.data.data),
+    onSuccess: () => onDocumentSaved(qc, 'transfer-forms', 'Transfer form saved'),
+    onError: documentError('Failed to save transfer form'),
+  });
+};

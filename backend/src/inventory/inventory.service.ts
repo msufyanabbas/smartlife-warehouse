@@ -132,6 +132,36 @@ async addStock(id: string, dto: AddStockDto) {
   return this.itemRepository.save(item);
 }
 
+  async removeStock(id: string, quantity: number, reason?: string) {
+    const item = await this.findOne(id);
+
+    if (quantity <= 0) throw new BadRequestException('Quantity must be greater than 0');
+    if (quantity > item.availableQuantity) {
+      throw new BadRequestException(
+        `Cannot remove ${quantity} — only ${item.availableQuantity} available`,
+      );
+    }
+
+    item.totalQuantity -= quantity;
+    item.availableQuantity -= quantity;
+    // Store reason in notes if provided, keeping an audit trail.
+    if (reason) {
+      const reasonLabel = {
+        damaged: 'Damaged/Defective',
+        expired: 'Expired',
+        lost: 'Lost/Missing',
+        returned_to_supplier: 'Returned to Supplier',
+        adjustment: 'Stock Adjustment',
+        other: 'Other',
+      }[reason] || reason;
+      item.notes = item.notes
+        ? `${item.notes} | Stock removed (${reasonLabel})`
+        : `Stock removed (${reasonLabel})`;
+    }
+
+    return this.itemRepository.save(item);
+  }
+
   async remove(id: string) {
     const item = await this.findOne(id);
     if (item.assignedQuantity > 0) {

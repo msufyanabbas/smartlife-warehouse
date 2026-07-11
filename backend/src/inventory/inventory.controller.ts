@@ -71,6 +71,15 @@ export class InventoryController {
     return this.inventoryService.addStock(id, dto);
   }
 
+  @Patch(':id/remove-stock')
+  @Roles(Role.ADMIN, Role.MANAGER)
+  removeStock(
+    @Param('id') id: string,
+    @Body() body: { quantity: number; reason?: string },
+  ) {
+    return this.inventoryService.removeStock(id, body.quantity, body.reason);
+  }
+
   @Delete(':id')
   @Roles(Role.ADMIN, Role.MANAGER)
   remove(@Param('id') id: string) {

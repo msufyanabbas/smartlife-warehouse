@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { ArrowLeft, FileText, Plus, Printer, Save } from 'lucide-react';
 import { format } from 'date-fns';
+import toast from 'react-hot-toast';
 import {
   useCreateGrn, useGrn, useGrnList, useInventory, useUpdateGrn, useUsers,
 } from '../../hooks/useApi';
@@ -192,6 +193,11 @@ function GrnEditor({ id, doc, onClose, onCreated }: {
   const purchaseOrders = uniqueSorted((inventory as any[]).map(i => i.purchaseOrder));
 
   const save = async (status: GrnDocument['status']) => {
+    if (status === 'completed' && form.status !== 'completed') {
+      const ok = window.confirm('Completing this GRN will create or top up the matching inventory items. Continue?');
+      if (!ok) return;
+    }
+
     const payload = {
       ...form,
       status,
@@ -206,6 +212,13 @@ function GrnEditor({ id, doc, onClose, onCreated }: {
     } else {
       const created = await createGrn.mutateAsync(payload);
       onCreated(created.id);
+    }
+
+    if (status === 'completed') {
+      const count = payload.items.filter(i => Number(i.receivedQty) > 0).length;
+      toast.success(`GRN completed — ${count} inventory item${count === 1 ? '' : 's'} have been created/updated`);
+    } else {
+      toast.success('Draft saved');
     }
   };
 

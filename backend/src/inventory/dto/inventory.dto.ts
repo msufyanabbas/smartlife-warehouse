@@ -35,7 +35,15 @@ purchaseOrder?: string;
 
     @IsOptional()
   @IsString()
-  serialNumber?: string;  
+  serialNumber?: string;
+
+  @IsOptional()
+  @IsString()
+  grnId?: string;
+
+  @IsOptional()
+  @IsString()
+  grnNo?: string;
 
   @IsString()
   @IsNotEmpty()

@@ -10,6 +10,12 @@ export const useInventory = () =>
     queryFn: () => api.get('/inventory').then(r => r.data.data),
   });
 
+export const useGrnReceipts = () =>
+  useQuery({
+    queryKey: ['grn-receipts'],
+    queryFn: () => api.get('/inventory/grn-receipts').then(r => r.data.data),
+  });
+
 export const useInventoryStats = () =>
   useQuery({
     queryKey: ['inventory-stats'],
@@ -20,7 +26,11 @@ export const useCreateItem = () => {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (data: any) => api.post('/inventory', data).then(r => r.data.data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['inventory'] }); toast.success('Item created'); },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['inventory'] });
+      qc.invalidateQueries({ queryKey: ['inventory-stats'] });
+      toast.success('Item created');
+    },
     onError: (e: any) => toast.error(e.response?.data?.message || 'Failed to create item'),
   });
 };
@@ -29,7 +39,7 @@ export const useUpdateItem = () => {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: any }) => api.put(`/inventory/${id}`, data).then(r => r.data.data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['inventory'] }); toast.success('Item updated'); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['inventory'] }); qc.invalidateQueries({ queryKey: ['inventory-stats'] }); toast.success('Item updated'); },
     onError: (e: any) => toast.error(e.response?.data?.message || 'Failed to update item'),
   });
 };
@@ -47,7 +57,7 @@ export const useDeleteItem = () => {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api.delete(`/inventory/${id}`).then(r => r.data.data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['inventory'] }); toast.success('Item removed'); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['inventory'] }); qc.invalidateQueries({ queryKey: ['inventory-stats'] }); toast.success('Item removed'); },
     onError: (e: any) => toast.error(e.response?.data?.message || 'Failed'),
   });
 };
@@ -459,10 +469,18 @@ export const useAssignedUsedReport = () =>
 const listDocuments = (resource: string) => api.get(`/${resource}`).then(r => r.data.data);
 const getDocument = (resource: string, id?: string) => api.get(`/${resource}/${id}`).then(r => r.data.data);
 
-const onDocumentSaved = (qc: ReturnType<typeof useQueryClient>, resource: string, message: string) => {
+// Completing a document mutates inventory (GRN creates/updates rows, assignment
+// forms issue stock, transfer forms re-home it), so every save refreshes the
+// inventory-derived caches. The success toast is left to the page, which knows
+// the concrete outcome (how many items, to whom / where).
+const onDocumentSaved = (qc: ReturnType<typeof useQueryClient>, resource: string) => {
   qc.invalidateQueries({ queryKey: [resource] });
   qc.invalidateQueries({ queryKey: ['inventory'] });
-  toast.success(message);
+  qc.invalidateQueries({ queryKey: ['inventory-stats'] });
+  // Completing a GRN stamps grnId onto inventory rows, so the receipts feed moves too.
+  if (resource === 'grn') qc.invalidateQueries({ queryKey: ['grn-receipts'] });
+  // Issuing an assignment form opens assignment records.
+  if (resource === 'assignment-forms') qc.invalidateQueries({ queryKey: ['assignments'] });
 };
 
 const documentError = (fallback: string) => (e: any) =>
@@ -479,7 +497,7 @@ export const useCreateGrn = () => {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (data: any) => api.post('/grn', data).then(r => r.data.data),
-    onSuccess: () => onDocumentSaved(qc, 'grn', 'GRN created'),
+    onSuccess: () => onDocumentSaved(qc, 'grn'),
     onError: documentError('Failed to create GRN'),
   });
 };
@@ -488,7 +506,7 @@ export const useUpdateGrn = () => {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: any }) => api.put(`/grn/${id}`, data).then(r => r.data.data),
-    onSuccess: () => onDocumentSaved(qc, 'grn', 'GRN saved'),
+    onSuccess: () => onDocumentSaved(qc, 'grn'),
     onError: documentError('Failed to save GRN'),
   });
 };
@@ -508,7 +526,7 @@ export const useCreateAssignmentForm = () => {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (data: any) => api.post('/assignment-forms', data).then(r => r.data.data),
-    onSuccess: () => onDocumentSaved(qc, 'assignment-forms', 'Assignment form created'),
+    onSuccess: () => onDocumentSaved(qc, 'assignment-forms'),
     onError: documentError('Failed to create assignment form'),
   });
 };
@@ -518,7 +536,7 @@ export const useUpdateAssignmentForm = () => {
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: any }) =>
       api.put(`/assignment-forms/${id}`, data).then(r => r.data.data),
-    onSuccess: () => onDocumentSaved(qc, 'assignment-forms', 'Assignment form saved'),
+    onSuccess: () => onDocumentSaved(qc, 'assignment-forms'),
     onError: documentError('Failed to save assignment form'),
   });
 };
@@ -538,7 +556,7 @@ export const useCreateTransferForm = () => {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (data: any) => api.post('/transfer-forms', data).then(r => r.data.data),
-    onSuccess: () => onDocumentSaved(qc, 'transfer-forms', 'Transfer form created'),
+    onSuccess: () => onDocumentSaved(qc, 'transfer-forms'),
     onError: documentError('Failed to create transfer form'),
   });
 };
@@ -548,7 +566,7 @@ export const useUpdateTransferForm = () => {
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: any }) =>
       api.put(`/transfer-forms/${id}`, data).then(r => r.data.data),
-    onSuccess: () => onDocumentSaved(qc, 'transfer-forms', 'Transfer form saved'),
+    onSuccess: () => onDocumentSaved(qc, 'transfer-forms'),
     onError: documentError('Failed to save transfer form'),
   });
 };

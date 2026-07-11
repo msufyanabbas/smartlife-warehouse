@@ -51,6 +51,22 @@ export class InventoryItem {
   @Column({ nullable: true })
   serialNumber: string;
 
+  /** Set when a GRN document is completed; stock without one was added directly. */
+  @Column({ nullable: true })
+  grnId: string;
+
+  /** Denormalised alongside grnId so reports need no join. */
+  @Column({ nullable: true })
+  grnNo: string;
+
+  /** Set when an assignment form issues this stock to a worker. */
+  @Column({ nullable: true })
+  assignmentFormId: string;
+
+  /** Set when a transfer form moves this stock to another location. */
+  @Column({ nullable: true })
+  transferFormId: string;
+
   @Column({ type: 'int', default: 0 })
   totalQuantity: number;
 

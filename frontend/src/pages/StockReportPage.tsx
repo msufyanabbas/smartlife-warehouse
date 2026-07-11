@@ -10,6 +10,7 @@ interface InventoryItem {
   category?: string; serialNumber?: string;
   totalQuantity: number; availableQuantity: number; assignedQuantity: number;
   usedQuantity: number; condition: string;
+  grnId?: string; grnNo?: string;
   receivedAt?: string; createdAt: string;
 }
 
@@ -25,6 +26,7 @@ interface StockRow {
   sku: string;
   serialNumber: string;
   schemeNo: string;
+  grnNo: string;
   category: string;
   opening: number;
   received: number;
@@ -90,7 +92,7 @@ function StockMovementReport() {
 
   // Build stock report rows
   const reportRows = useMemo((): StockRow[] => {
-    const from = dateFrom ? new Date(dateFrom) : new Date('2000-01-01');
+    const from = dateFrom ? new Date(dateFrom + 'T00:00:00') : new Date('2000-01-01T00:00:00');
     const to = dateTo ? new Date(dateTo + 'T23:59:59') : new Date();
 
     return list
@@ -101,32 +103,54 @@ function StockMovementReport() {
         const matchCat = !categoryFilter || item.category === categoryFilter;
         return matchSearch && matchScheme && matchCat;
       })
+      // Only items backed by a formal GRN document belong in the stock report.
+      // Stock added directly to inventory (no GRN) is undocumented and excluded.
+      .filter(item => !!item.grnId)
       .map(item => {
-        const itemCreated = new Date(item.createdAt);
-
-        // Opening stock = total qty minus anything received IN the period
-        // i.e., what was the stock at the START of the period
-        const receivedInPeriod = itemCreated >= from && itemCreated <= to
-          ? item.totalQuantity  // item created in period = all qty received in period
-          : 0;
-        // For items existing before the period, opening = totalQuantity at period start
-        // We approximate: opening = current total - received in period + issued in period
-        const issuedInPeriod = usage
-          .filter(u => {
-            if (u.itemId !== item.id) return false;
-            const d = new Date(u.usedAt || u.createdAt);
-            return d >= from && d <= to;
-          })
+        // recordUsage() deducts consumption from totalQuantity, so the stored
+        // total is stock as of *now*. Rewind it by re-adding usage logged after
+        // each point in time we want to report on.
+        const usageFor = (match: (d: Date) => boolean) => usage
+          .filter(u => u.itemId === item.id && match(new Date(u.usedAt || u.createdAt)))
           .reduce((s, u) => s + u.quantityUsed, 0);
 
-        const received = itemCreated >= from && itemCreated <= to ? item.totalQuantity : 0;
+        const issuedInPeriod = usageFor(d => d >= from && d <= to);
+        const issuedAfterPeriod = usageFor(d => d > to);
+
+        // Receipt date for the GRN-backed stock: prefer the explicit receipt
+        // timestamp, otherwise fall back to when the GRN-linked row was created.
+        const receiptDate = item.receivedAt
+          ? new Date(item.receivedAt)
+          : item.grnId
+            ? new Date(item.createdAt)
+            : null;
+
+        // Received in period = has GRN AND receipt date falls within period.
+        const receivedInPeriod = !!(
+          item.grnId &&
+          receiptDate &&
+          receiptDate >= from &&
+          receiptDate <= to
+        );
+
+        // Opening = has GRN AND receipt date is BEFORE the period started.
+        const grnBeforePeriod = !!(
+          item.grnId &&
+          receiptDate &&
+          receiptDate < from
+        );
+
+        // Rewinding in-period and post-period usage gives the quantity the item
+        // held before anything was drawn down — its receipt quantity.
+        const stockBeforeIssues = item.totalQuantity + issuedInPeriod + issuedAfterPeriod;
+
+        // Received quantity — GRN-backed stock receipted in this period.
+        const received = receivedInPeriod ? stockBeforeIssues : 0;
+        // Opening stock — GRN-backed stock that existed before this period.
+        const opening = grnBeforePeriod ? Math.max(0, stockBeforeIssues) : 0;
+        // Closing = Opening + Received − Issued.
+        const closing = Math.max(0, opening + received - issuedInPeriod);
         const issued = issuedInPeriod;
-        // Opening: if item existed before period, opening = current + issued - received
-        // If created in period, opening = 0
-        const opening = itemCreated < from
-          ? Math.max(0, item.totalQuantity + issued - received)
-          : 0;
-        const closing = opening + received - issued;
 
         return {
           itemId: item.id,
@@ -134,6 +158,7 @@ function StockMovementReport() {
           sku: item.sku,
           serialNumber: item.serialNumber || '',
           schemeNo: item.schemeNo || '',
+          grnNo: item.grnNo || '',
           category: item.category || '',
           opening,
           received,
@@ -163,6 +188,7 @@ function StockMovementReport() {
       'SKU': r.sku,
       'Serial No.': r.serialNumber,
       'Scheme No.': r.schemeNo,
+      'GRN No.': r.grnNo,
       'Category': r.category,
       'Opening': r.opening,
       'Received': r.received,
@@ -176,6 +202,7 @@ function StockMovementReport() {
       'SKU': '',
       'Serial No.': '',
       'Scheme No.': '',
+      'GRN No.': '',
       'Category': '',
       'Opening': totals.opening,
       'Received': totals.received,
@@ -284,6 +311,7 @@ function StockMovementReport() {
                 <th>SKU</th>
                 <th>Serial No.</th>
                 <th>Scheme</th>
+                <th>GRN No.</th>
                 <th>Category</th>
                 <th style={{ textAlign: 'center', background: 'var(--bg-3)' }}>Opening</th>
                 <th style={{ textAlign: 'center', color: 'var(--green)' }}>Received</th>
@@ -306,6 +334,11 @@ function StockMovementReport() {
                       {row.serialNumber || '—'}
                     </td>
                     <td style={{ fontSize: 12, color: 'var(--text-2)' }}>{row.schemeNo || '—'}</td>
+                    <td style={{ fontSize: 12 }}>
+                      {row.grnNo
+                        ? <span className="badge badge-blue">{row.grnNo}</span>
+                        : <span style={{ color: 'var(--text-3)' }}>No GRN</span>}
+                    </td>
                     <td style={{ fontSize: 12, color: 'var(--text-2)' }}>{row.category || '—'}</td>
                     <td style={{ textAlign: 'center', fontWeight: 600 }}>{row.opening}</td>
                     <td style={{ textAlign: 'center', fontWeight: 700, color: row.received > 0 ? 'var(--green)' : 'var(--text-3)' }}>
@@ -324,7 +357,7 @@ function StockMovementReport() {
             {/* Totals row */}
             <tfoot>
               <tr style={{ background: 'var(--bg-3)', fontWeight: 700, fontSize: 13 }}>
-                <td colSpan={5} style={{ padding: '10px 16px', color: 'var(--text-2)', textTransform: 'uppercase', letterSpacing: '0.05em', fontSize: 11 }}>
+                <td colSpan={6} style={{ padding: '10px 16px', color: 'var(--text-2)', textTransform: 'uppercase', letterSpacing: '0.05em', fontSize: 11 }}>
                   Total ({reportRows.length} items)
                 </td>
                 <td style={{ textAlign: 'center', padding: '10px 16px' }}>{totals.opening}</td>
@@ -338,10 +371,10 @@ function StockMovementReport() {
       )}
 
       {/* Legend */}
-      {/* <div style={{ marginTop: 16, padding: '12px 16px', background: 'var(--bg-2)', borderRadius: 'var(--radius)', border: '1px solid var(--border)', fontSize: 12, color: 'var(--text-3)' }}>
+      <div style={{ marginTop: 16, padding: '12px 16px', background: 'var(--bg-2)', borderRadius: 'var(--radius)', border: '1px solid var(--border)', fontSize: 12, color: 'var(--text-3)' }}>
         <strong style={{ color: 'var(--text-2)' }}>How it works:</strong>
-        {' '}Opening = stock before the period · Received = items added in period · Issued = items used/consumed in period · Closing = Opening + Received − Issued
-      </div> */}
+        {' '}Opening = stock receipted via GRN before this period · Received = stock receipted via GRN within this period · Issued = items consumed/used in this period · Closing = Opening + Received − Issued · Items with no GRN document are excluded from this report
+      </div>
     </div>
   );
 }

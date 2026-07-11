@@ -36,6 +36,12 @@ export class InventoryController {
     return this.inventoryService.getStats();
   }
 
+  // Must precede @Get(':id') or 'grn-receipts' is parsed as an item id.
+  @Get('grn-receipts')
+  getGrnReceipts() {
+    return this.inventoryService.getGrnReceipts();
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.inventoryService.findOne(id);

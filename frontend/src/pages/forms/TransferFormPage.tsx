@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { ArrowLeft, ArrowLeftRight, Plus, Printer, Save } from 'lucide-react';
 import { format } from 'date-fns';
+import toast from 'react-hot-toast';
 import {
   useCreateTransferForm, useInventory, useTransferForm, useTransferForms,
   useUpdateTransferForm, useUsers,
@@ -215,6 +216,14 @@ function TransferEditor({ id, doc, onClose, onCreated }: {
     } else {
       const created = await createForm.mutateAsync(payload);
       onCreated(created.id);
+    }
+
+    if (status === 'completed') {
+      const count = payload.items.filter(i => Number(i.qtyToTransfer) > 0).length;
+      const dest = [form.toWarehouse, form.toProjectSite].filter(Boolean).join(' · ') || 'the destination';
+      toast.success(`Transfer completed — ${count} item${count === 1 ? '' : 's'} moved to ${dest}`);
+    } else {
+      toast.success(status === 'approved' ? 'Transfer approved' : 'Draft saved');
     }
   };
 

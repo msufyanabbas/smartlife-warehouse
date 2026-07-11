@@ -154,9 +154,11 @@ function ItemCodePicker({ row, source, filterStock, onPick, readOnly, usedIds }:
               ))
         ) : (
           <div style={{ padding: '12px 16px', fontSize: 13, color: 'var(--text-3)' }}>
-            {source === 'products'
-              ? 'No matching product in the catalog'
-              : 'No stock available at this location'}
+            {source !== 'products'
+              ? 'No stock available at this location'
+              : !query.trim()
+                ? 'Type a code or name to search the catalog…'
+                : 'No matching product in the catalog'}
           </div>
         )}
       </FloatingDropdown>
@@ -308,6 +310,7 @@ function Cell({ row, column, readOnly, onChange }: {
         style={{ textAlign: 'center' }}
         min={0}
         max={max}
+        placeholder="0"
         value={value === 0 || value == null ? '' : value}
         onChange={e => {
           const parsed = e.target.value === '' ? 0 : Number(e.target.value);

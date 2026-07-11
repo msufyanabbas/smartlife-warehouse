@@ -1,12 +1,15 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { TransferForm, TransferFormLineItem } from './entities/transfer-form.entity';
+import {
+  TransferForm, TransferFormLineItem, TransferFormStatus,
+} from './entities/transfer-form.entity';
 import {
   CreateTransferFormDto,
   TransferFormItemDto,
   UpdateTransferFormDto,
 } from './dto/transfer-form.dto';
+import { InventoryItem } from '../inventory/entities/inventory-item.entity';
 import { generateRefNumber } from '../common/utils/generate-ref-number';
 
 @Injectable()
@@ -14,6 +17,8 @@ export class TransferFormsService {
   constructor(
     @InjectRepository(TransferForm)
     private formRepository: Repository<TransferForm>,
+    @InjectRepository(InventoryItem)
+    private inventoryRepository: Repository<InventoryItem>,
   ) {}
 
   async findAll() {
@@ -33,14 +38,54 @@ export class TransferFormsService {
       transferNo,
       items: normalizeItems(dto.items),
     });
-    return this.formRepository.save(doc);
+    const saved = await this.formRepository.save(doc);
+    if (saved.status === TransferFormStatus.COMPLETED) {
+      await this.applyTransfer(saved);
+    }
+    return saved;
   }
 
   async update(id: string, dto: UpdateTransferFormDto) {
     const doc = await this.findOne(id);
+    // Captured before the merge — the inventory move must run exactly once, on
+    // the transition into `completed`, not on every save of a completed form.
+    const wasCompleted = doc.status === TransferFormStatus.COMPLETED;
+
     Object.assign(doc, dto);
     if (dto.items) doc.items = normalizeItems(dto.items);
-    return this.formRepository.save(doc);
+
+    const saved = await this.formRepository.save(doc);
+    if (!wasCompleted && saved.status === TransferFormStatus.COMPLETED) {
+      await this.applyTransfer(saved);
+    }
+    return saved;
+  }
+
+  /**
+   * Completing a form is the primary way stock changes location. Each line's
+   * inventory row is re-homed to the destination project/warehouse — quantities
+   * are untouched (stock moved, not consumed) — and stamped with the form id.
+   */
+  private async applyTransfer(form: TransferForm) {
+    for (const line of form.items) {
+      if (line.qtyToTransfer <= 0) continue;
+
+      // Prefer the explicit inventory link; fall back to SKU at the origin.
+      const item = line.itemId
+        ? await this.inventoryRepository.findOne({ where: { id: line.itemId } })
+        : await this.inventoryRepository.findOne({
+            where: { sku: line.itemCode?.trim() },
+            order: { createdAt: 'DESC' },
+          });
+      if (!item) continue;
+
+      // The destination site is keyed on schemeNo (what the stock report and the
+      // transfer "from" filter group by); the warehouse maps to location.
+      if (form.toProjectSite) item.schemeNo = form.toProjectSite;
+      if (form.toWarehouse) item.location = form.toWarehouse;
+      item.transferFormId = form.id;
+      await this.inventoryRepository.save(item);
+    }
   }
 }
 

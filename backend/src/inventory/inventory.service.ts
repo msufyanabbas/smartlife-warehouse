@@ -5,7 +5,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { IsNull, Not, Repository } from 'typeorm';
 import { InventoryItem } from './entities/inventory-item.entity';
 import {
   CreateInventoryItemDto,
@@ -32,6 +32,18 @@ export class InventoryService {
     });
     if (!item) throw new NotFoundException(`Item ${id} not found`);
     return item;
+  }
+
+  /** Stock that arrived through a completed GRN document. */
+  async getGrnReceipts() {
+    return this.itemRepository.find({
+      where: { grnId: Not(IsNull()) },
+      select: [
+        'id', 'name', 'sku', 'grnId', 'grnNo', 'schemeNo', 'projectName',
+        'totalQuantity', 'category', 'serialNumber', 'createdAt', 'receivedAt',
+      ],
+      order: { createdAt: 'DESC' },
+    });
   }
 
   async create(dto: CreateInventoryItemDto) {

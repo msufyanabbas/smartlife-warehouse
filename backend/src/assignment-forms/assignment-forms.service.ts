@@ -11,6 +11,8 @@ import {
   CreateAssignmentFormDto,
   UpdateAssignmentFormDto,
 } from './dto/assignment-form.dto';
+import { Assignment, AssignmentStatus } from '../assignments/entities/assignment.entity';
+import { InventoryItem } from '../inventory/entities/inventory-item.entity';
 import { InventoryService } from '../inventory/inventory.service';
 import { generateRefNumber } from '../common/utils/generate-ref-number';
 
@@ -19,6 +21,10 @@ export class AssignmentFormsService {
   constructor(
     @InjectRepository(AssignmentForm)
     private formRepository: Repository<AssignmentForm>,
+    @InjectRepository(Assignment)
+    private assignmentRepository: Repository<Assignment>,
+    @InjectRepository(InventoryItem)
+    private inventoryRepository: Repository<InventoryItem>,
     private inventoryService: InventoryService,
   ) {}
 
@@ -42,7 +48,7 @@ export class AssignmentFormsService {
 
     const saved = await this.formRepository.save(doc);
     if (saved.status === AssignmentFormStatus.ISSUED) {
-      await this.deductInventory(saved.items);
+      await this.issueItems(saved);
     }
     return saved;
   }
@@ -58,20 +64,42 @@ export class AssignmentFormsService {
 
     const saved = await this.formRepository.save(doc);
     if (!wasIssued && saved.status === AssignmentFormStatus.ISSUED) {
-      await this.deductInventory(saved.items);
+      await this.issueItems(saved);
     }
     return saved;
   }
 
-  /** Moves issued quantities out of `available` and into `assigned`. */
-  private async deductInventory(items: AssignmentFormLineItem[]) {
-    for (const item of items) {
+  /**
+   * Issuing a form is the primary way stock is assigned to a worker. For each
+   * issued line it moves the quantity out of `available` and into `assigned`,
+   * records an assignment linking the item to the recipient, and stamps the
+   * form id on the inventory row so the assignment is traceable to its document.
+   */
+  private async issueItems(form: AssignmentForm) {
+    for (const item of form.items) {
       if (!item.itemId || item.qtyIssued <= 0) continue;
+
       await this.inventoryService.adjustQuantities(
         item.itemId,
         item.qtyIssued,
         -item.qtyIssued,
       );
+
+      // A recipient is required to open an assignment record; without one the
+      // stock still moves into `assigned` but no per-worker record is created.
+      if (form.assignedToId) {
+        const assignment = this.assignmentRepository.create({
+          itemId: item.itemId,
+          assignedToId: form.assignedToId,
+          assignedById: form.requestedById || undefined,
+          quantity: item.qtyIssued,
+          status: AssignmentStatus.ACTIVE,
+          notes: `Issued via assignment form ${form.assignmentNo}`,
+        });
+        await this.assignmentRepository.save(assignment);
+      }
+
+      await this.inventoryRepository.update(item.itemId, { assignmentFormId: form.id });
     }
   }
 }

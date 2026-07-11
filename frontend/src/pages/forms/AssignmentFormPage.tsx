@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { ArrowLeft, ClipboardList, Plus, Printer, Save } from 'lucide-react';
 import { format } from 'date-fns';
+import toast from 'react-hot-toast';
 import {
   useAssignmentForm, useAssignmentForms, useCreateAssignmentForm, useUpdateAssignmentForm, useUsers,
 } from '../../hooks/useApi';
@@ -218,6 +219,15 @@ function AssignmentEditor({ id, doc, onClose, onCreated }: {
     } else {
       const created = await createForm.mutateAsync(payload);
       onCreated(created.id);
+    }
+
+    if (status === 'issued') {
+      const count = payload.items.filter(i => Number(i.qtyIssued) > 0).length;
+      const worker = (users as User[]).find(u => u.id === form.assignedToId);
+      const who = worker ? fullName(worker) : 'the recipient';
+      toast.success(`Assignment issued — ${count} item${count === 1 ? '' : 's'} assigned to ${who}`);
+    } else {
+      toast.success(status === 'approved' ? 'Assignment approved' : 'Draft saved');
     }
   };
 

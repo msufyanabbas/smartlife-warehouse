@@ -3,7 +3,7 @@ import * as XLSX from 'xlsx';
 import { Plus, Search, Trash2, Package, ChevronDown, CheckCircle, Download, Filter, X, Edit2 } from 'lucide-react';
 import { format } from 'date-fns';
 import {
-  useInventory, useCreateItem, useAddStock, useDeleteItem, useUpdateItem,
+  useInventory, useCreateItem, useAddStock, useRemoveStock, useDeleteItem, useUpdateItem,
   useProductSearch, useCategoriesFlat,
 } from '../hooks/useApi';
 import { useAuth } from '../contexts/AuthContext';
@@ -290,6 +290,7 @@ export default function InventoryPage() {
   const createItem = useCreateItem();
   const updateItem = useUpdateItem();
   const addStock = useAddStock();
+  const removeStock = useRemoveStock();
   const deleteItem = useDeleteItem();
   const { data: categories = [] } = useCategoriesFlat();
   const cats = categories as Category[];
@@ -312,6 +313,9 @@ export default function InventoryPage() {
   const [stockQty, setStockQty] = useState('1');
   const [stockDate, setStockDate] = useState('');
   const [stockScheme, setStockScheme] = useState('');
+  const [removeStockTarget, setRemoveStockTarget] = useState<InventoryItem | null>(null);
+  const [removeQty, setRemoveQty] = useState('1');
+  const [removeReason, setRemoveReason] = useState('');
   const [expandedSchemes, setExpandedSchemes] = useState<Set<string>>(new Set());
   const [compactView, setCompactView] = useState(false);
 
@@ -671,6 +675,14 @@ export default function InventoryPage() {
                                       <Edit2 size={13} />
                                     </button>
                                     <button className="btn btn-ghost btn-sm" onClick={() => { setStockTarget(item); setStockQty('1'); setStockDate(''); setStockScheme(''); }}>+ Stock</button>
+                                    <button
+                                      className="btn btn-danger btn-sm"
+                                      style={{ opacity: item.availableQuantity === 0 ? 0.4 : 1 }}
+                                      disabled={item.availableQuantity === 0}
+                                      onClick={() => { setRemoveStockTarget(item); setRemoveQty('1'); setRemoveReason(''); }}
+                                    >
+                                      − Stock
+                                    </button>
                                     {isManager && (
                                       <button className="btn btn-danger btn-sm btn-icon" title="Permanently delete"
                                         onClick={() => { if (confirm(`Permanently delete "${item.name}"? This cannot be undone.`)) deleteItem.mutate(item.id); }}>
@@ -805,6 +817,95 @@ export default function InventoryPage() {
             {parseInt(stockQty) > 0 && (
               <div style={{ fontSize: 13, color: 'var(--text-2)' }}>
                 New total: <strong style={{ color: 'var(--green)' }}>{stockTarget.totalQuantity + parseInt(stockQty)}</strong>
+              </div>
+            )}
+          </>
+        )}
+      </Modal>
+
+      {/* ── Remove Stock Modal ── */}
+      <Modal
+        isOpen={!!removeStockTarget}
+        onClose={() => { setRemoveStockTarget(null); setRemoveReason(''); }}
+        title={`Remove Stock — ${removeStockTarget?.name}`}
+        footer={<>
+          <button className="btn btn-ghost" onClick={() => { setRemoveStockTarget(null); setRemoveReason(''); }}>
+            Cancel
+          </button>
+          <button
+            className="btn btn-danger"
+            onClick={async () => {
+              if (!removeStockTarget) return;
+              const qty = parseInt(removeQty);
+              if (qty > removeStockTarget.availableQuantity) {
+                alert(`Cannot remove more than available quantity (${removeStockTarget.availableQuantity})`);
+                return;
+              }
+              await removeStock.mutateAsync({
+                id: removeStockTarget.id,
+                quantity: qty,
+                reason: removeReason || undefined,
+              });
+              setRemoveStockTarget(null);
+              setRemoveReason('');
+            }}
+            disabled={removeStock.isPending}
+          >
+            {removeStock.isPending ? 'Removing…' : 'Remove Stock'}
+          </button>
+        </>}
+      >
+        {removeStockTarget && (
+          <>
+            <div style={{ background: 'var(--bg-3)', borderRadius: 10, padding: 14, marginBottom: 16 }}>
+              <div style={{ fontWeight: 600 }}>{removeStockTarget.name}</div>
+              <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 4 }}>
+                SKU: {removeStockTarget.sku}
+                {removeStockTarget.serialNumber && <span> · Serial: <code style={{ color: 'var(--accent)' }}>{removeStockTarget.serialNumber}</code></span>}
+                {' · '}Available: <strong style={{ color: 'var(--green)' }}>{removeStockTarget.availableQuantity}</strong>
+                {' · '}Total: <strong style={{ color: 'var(--text)' }}>{removeStockTarget.totalQuantity}</strong>
+              </div>
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Quantity to Remove *</label>
+              <input
+                type="number"
+                min="1"
+                max={removeStockTarget.availableQuantity}
+                className="form-input"
+                value={removeQty}
+                onChange={e => setRemoveQty(e.target.value)}
+                autoFocus
+              />
+              {parseInt(removeQty) > removeStockTarget.availableQuantity && (
+                <p style={{ fontSize: 12, color: 'var(--red)', marginTop: 4 }}>
+                  Cannot exceed available quantity ({removeStockTarget.availableQuantity})
+                </p>
+              )}
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Reason for Removal</label>
+              <select className="form-input" value={removeReason} onChange={e => setRemoveReason(e.target.value)}>
+                <option value="">— Select reason —</option>
+                <option value="damaged">Damaged / Defective</option>
+                <option value="expired">Expired</option>
+                <option value="lost">Lost / Missing</option>
+                <option value="returned_to_supplier">Returned to Supplier</option>
+                <option value="adjustment">Stock Adjustment</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+
+            {parseInt(removeQty) > 0 && parseInt(removeQty) <= removeStockTarget.availableQuantity && (
+              <div style={{ fontSize: 13, color: 'var(--text-2)' }}>
+                New total: <strong style={{ color: 'var(--red)' }}>
+                  {removeStockTarget.totalQuantity - parseInt(removeQty)}
+                </strong>
+                {' · '}New available: <strong style={{ color: 'var(--red)' }}>
+                  {removeStockTarget.availableQuantity - parseInt(removeQty)}
+                </strong>
               </div>
             )}
           </>

@@ -53,6 +53,20 @@ export const useAddStock = () => {
   });
 };
 
+export const useRemoveStock = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, quantity, reason }: { id: string; quantity: number; reason?: string }) =>
+      api.patch(`/inventory/${id}/remove-stock`, { quantity, reason }).then(r => r.data.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['inventory'] });
+      qc.invalidateQueries({ queryKey: ['inventory-stats'] });
+      toast.success('Stock removed');
+    },
+    onError: (e: any) => toast.error(e.response?.data?.message || 'Failed to remove stock'),
+  });
+};
+
 export const useDeleteItem = () => {
   const qc = useQueryClient();
   return useMutation({

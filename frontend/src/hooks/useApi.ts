@@ -126,6 +126,13 @@ export const useDeleteUser = () => {
 };
 
 // ── Assignments ────────────────────────────────────────────────────────────
+/** Every assignment, returned ones included — needed to value a past period. */
+export const useAssignmentHistory = () =>
+  useQuery({
+    queryKey: ['assignments-history'],
+    queryFn: () => api.get('/assignments/history').then(r => r.data.data),
+  });
+
 export const useAssignments = () =>
   useQuery({
     queryKey: ['assignments'],

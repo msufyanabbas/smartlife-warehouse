@@ -49,6 +49,14 @@ export class AssignmentsController {
     return this.assignmentsService.getReport();
   }
 
+  // Also before `:id`. Unlike findAll this includes returned assignments, so the
+  // stock report can work out what was with workers at a past date.
+  @Get('history')
+  @Roles(Role.ADMIN, Role.MANAGER)
+  getHistory() {
+    return this.assignmentsService.findAllForReport();
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.assignmentsService.findOne(id);

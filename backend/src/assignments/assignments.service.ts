@@ -114,6 +114,20 @@ export class AssignmentsService {
     });
   }
 
+  /**
+   * Every assignment ever made, returned ones included — the stock report has to
+   * reconstruct how much was out with workers at a *past* date, and the active-only
+   * feed hides anything handed back since.
+   */
+  async findAllForReport() {
+    // `assignedTo` and `item` are eager relations, which TypeORM cannot combine
+    // with a partial select — and the report only needs the columns anyway.
+    return this.assignmentRepository.find({
+      loadEagerRelations: false,
+      order: { createdAt: 'ASC' },
+    });
+  }
+
   // Used by managers/admins to see ALL active assignments (for transfer creation)
   async getAllActiveAssignments() {
     return this.assignmentRepository.find({

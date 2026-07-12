@@ -13,6 +13,24 @@ import {
   AddStockDto,
 } from './dto/inventory.dto';
 
+/** One inventory row whose assigned stock is not backed by assignment records. */
+export interface IntegrityMismatch {
+  id: string;
+  name: string;
+  sku: string;
+  schemeNo: string | null;
+  assignedQuantity: number;
+  activeAssigned: number;
+  /** Positive: stock booked out with no assignment behind it. Negative: the reverse. */
+  difference: number;
+  candidateForm: {
+    id: string;
+    assignmentNo: string;
+    assignedToId: string | null;
+    status: string;
+  } | null;
+}
+
 @Injectable()
 export class InventoryService {
   constructor(
@@ -32,6 +50,57 @@ export class InventoryService {
     });
     if (!item) throw new NotFoundException(`Item ${id} not found`);
     return item;
+  }
+
+  /**
+   * Items whose `assignedQuantity` disagrees with the assignment rows behind it.
+   *
+   * The two are written by separate statements — the quantity moves on the item,
+   * the assignment row records who holds it — so a failure between them (or any
+   * path that moves stock without opening an assignment) leaves stock booked out
+   * of the warehouse with nobody holding it. The stock report reconstructs its
+   * Assigned column from the assignment rows, so it reads zero for those items
+   * while the item itself still shows the quantity as gone.
+   *
+   * `candidateForm` names the assignment form whose lines cover the item, if any:
+   * that is where a repair would get the recipient from.
+   */
+  async getIntegrityReport() {
+    const mismatches: IntegrityMismatch[] = await this.itemRepository.query(`
+      select i.id,
+             i.name,
+             i.sku,
+             i."schemeNo",
+             i."assignedQuantity"::int                                        as "assignedQuantity",
+             coalesce(sum(a.quantity) filter (where a.status = 'active'), 0)::int as "activeAssigned",
+             (i."assignedQuantity"
+                - coalesce(sum(a.quantity) filter (where a.status = 'active'), 0))::int as difference,
+             (select json_build_object('id', f.id, 'assignmentNo', f."assignmentNo",
+                                       'assignedToId', f."assignedToId", 'status', f.status)
+                from assignment_forms f
+               where f.status = 'issued'
+                 and exists (select 1 from jsonb_array_elements(f.items) line
+                              where line->>'itemId' = i.id::text
+                                 or lower(line->>'itemCode') = lower(i.sku))
+               order by f."createdAt" desc
+               limit 1)                                                       as "candidateForm"
+        from inventory_items i
+        left join assignments a on a."itemId" = i.id
+       group by i.id
+      having i."assignedQuantity"
+             <> coalesce(sum(a.quantity) filter (where a.status = 'active'), 0)
+       order by abs(i."assignedQuantity"
+                    - coalesce(sum(a.quantity) filter (where a.status = 'active'), 0)) desc
+    `);
+
+    const itemsChecked = await this.itemRepository.count();
+    return {
+      itemsChecked,
+      mismatchCount: mismatches.length,
+      // Stock booked out of the warehouse that no assignment row accounts for.
+      unaccountedQuantity: mismatches.reduce((sum, m) => sum + Math.max(m.difference, 0), 0),
+      mismatches,
+    };
   }
 
   /** Stock that arrived through a completed GRN document. */

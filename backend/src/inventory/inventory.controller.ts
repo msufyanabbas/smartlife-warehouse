@@ -42,6 +42,15 @@ export class InventoryController {
     return this.inventoryService.getGrnReceipts();
   }
 
+  // Also before @Get(':id'). Reports items whose assigned stock is not backed by
+  // assignment records — the state that makes the stock report's Assigned column
+  // read zero against stock the item says is out with a worker.
+  @Get('integrity-check')
+  @Roles(Role.ADMIN)
+  integrityCheck() {
+    return this.inventoryService.getIntegrityReport();
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.inventoryService.findOne(id);

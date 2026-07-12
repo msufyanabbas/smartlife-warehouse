@@ -3,6 +3,7 @@ import * as XLSX from 'xlsx';
 import { ClipboardList, Download, Filter, Search } from 'lucide-react';
 import { format } from 'date-fns';
 import { useAssignedUsedReport } from '../hooks/useApi';
+import SerialNumbers from '../components/SerialNumbers';
 import { uniqueSorted } from '../components/documents/formUtils';
 import type { AssignedUsedReportRow } from '../types';
 
@@ -173,8 +174,8 @@ export default function AssignedUsedReport() {
                       {row.sku}
                     </code>
                   </td>
-                  <td style={{ fontFamily: 'monospace', fontSize: 12, color: 'var(--text-2)' }}>
-                    {row.serialNumber || '—'}
+                  <td style={{ fontSize: 12, color: 'var(--text-2)' }}>
+                    <SerialNumbers value={row.serialNumber} />
                   </td>
                   <td style={{ fontSize: 12, color: 'var(--text-2)' }}>{row.category || '—'}</td>
                   <td style={{ fontSize: 12, color: 'var(--text-2)' }}>{row.schemeNo || '—'}</td>

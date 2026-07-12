@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { CheckCircle, Plus, X } from 'lucide-react';
 import FloatingDropdown from '../FloatingDropdown';
+import SerialNumbers from '../SerialNumbers';
 import { useInventory, useProductSearch } from '../../hooks/useApi';
-import { emptyRow, type LineColumn, type LineRow } from './lineRows';
+import { emptyRow, splitSerials, type LineColumn, type LineRow } from './lineRows';
 
 interface CatalogProduct {
   id: string; name: string; sku: string; description?: string;
@@ -226,7 +227,7 @@ export default function LineItemsTable({
         <thead>
           <tr>
             <th>#</th>
-            {columns.map(c => <th key={c.key}>{c.label}</th>)}
+            {columns.map(c => <th key={c.key} title={c.hint}>{c.label}</th>)}
             {!readOnly && <th className="no-print" />}
           </tr>
         </thead>
@@ -290,6 +291,111 @@ export default function LineItemsTable({
   );
 }
 
+// ── Serial numbers ─────────────────────────────────────────────────────────
+/**
+ * A line can cover many units (100 remotes against one SKU) and each unit can
+ * carry its own serial. Below two units there is nothing to choose, so the cell
+ * is a plain input; above it the user says whether the serial they type covers
+ * the whole line or whether they want a slot per unit.
+ *
+ * The row holds a string ("one for all") or an array (one per unit); the backend
+ * flattens both into the same comma-separated field.
+ */
+function SerialNumberCell({ qty, value, onChange }: {
+  qty: number;
+  value: string | string[];
+  onChange: (value: string | string[]) => void;
+}) {
+  // A saved line comes back as "SN-1, SN-2, SN-3", so more than one serial means
+  // it was last filled in per unit and should reopen that way.
+  const [perUnit, setPerUnit] = useState(() => splitSerials(value).length > 1);
+
+  const serials = splitSerials(value);
+  const firstSerial = Array.isArray(value) ? (value[0] ?? '') : value;
+  const unitSerial = (index: number) =>
+    (Array.isArray(value) ? value[index] : serials[index]) ?? '';
+
+  // Re-slot when the quantity changes under the serials, so what is stored never
+  // covers more or fewer units than the line actually has.
+  useEffect(() => {
+    if (!perUnit || !Array.isArray(value) || value.length === qty) return;
+    onChange(Array.from({ length: qty }, (_, i) => value[i] ?? ''));
+  }, [perUnit, qty, value, onChange]);
+
+  const modeButton = (label: string, active: boolean, onClick: () => void) => (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        flex: 1, fontSize: 10, padding: '2px 4px', borderRadius: 4, cursor: 'pointer',
+        border: '1px solid var(--border)',
+        background: active ? 'var(--accent)' : 'var(--bg-3)',
+        color: active ? '#fff' : 'var(--text-2)',
+      }}
+    >
+      {label}
+    </button>
+  );
+
+  if (qty <= 1) {
+    return (
+      <input
+        className="doc-input"
+        style={{ fontFamily: 'monospace' }}
+        value={firstSerial}
+        placeholder="Serial No."
+        onChange={e => onChange(e.target.value)}
+      />
+    );
+  }
+
+  return (
+    <div>
+      <div className="no-print" style={{ display: 'flex', gap: 4, marginBottom: 4 }}>
+        {modeButton('One for all', !perUnit, () => {
+          setPerUnit(false);
+          onChange(firstSerial);
+        })}
+        {modeButton(`Per unit (${qty})`, perUnit, () => {
+          setPerUnit(true);
+          onChange(Array.from({ length: qty }, (_, i) => serials[i] ?? ''));
+        })}
+      </div>
+
+      {perUnit ? (
+        <div style={{
+          display: 'flex', flexDirection: 'column', gap: 2,
+          maxHeight: 120, overflowY: 'auto',
+          background: 'var(--bg-3)', borderRadius: 4, padding: 4,
+        }}>
+          {Array.from({ length: qty }, (_, i) => (
+            <input
+              key={i}
+              className="doc-input"
+              style={{ fontFamily: 'monospace', fontSize: 11, padding: '2px 6px' }}
+              value={unitSerial(i)}
+              placeholder={`Unit ${i + 1}`}
+              onChange={e => {
+                const next = Array.from({ length: qty }, (_, k) => unitSerial(k));
+                next[i] = e.target.value;
+                onChange(next);
+              }}
+            />
+          ))}
+        </div>
+      ) : (
+        <input
+          className="doc-input"
+          style={{ fontFamily: 'monospace' }}
+          value={firstSerial}
+          placeholder="Serial (all units)"
+          onChange={e => onChange(e.target.value)}
+        />
+      )}
+    </div>
+  );
+}
+
 function Cell({ row, column, readOnly, onChange }: {
   row: LineRow;
   column: LineColumn;
@@ -297,6 +403,24 @@ function Cell({ row, column, readOnly, onChange }: {
   onChange: (value: any) => void;
 }) {
   const value = row[column.key];
+
+  if (column.type === 'serial' && readOnly) {
+    return (
+      <div style={{ padding: '5px 7px', fontSize: 12 }}>
+        <SerialNumbers value={value} empty=" " />
+      </div>
+    );
+  }
+
+  if (column.type === 'serial') {
+    return (
+      <SerialNumberCell
+        qty={Number(column.qtyKey ? row[column.qtyKey] : 0) || 0}
+        value={value ?? ''}
+        onChange={onChange}
+      />
+    );
+  }
 
   if (readOnly || column.type === 'readonly') {
     const text = column.type === 'number' ? (value || 0) : (value || '');

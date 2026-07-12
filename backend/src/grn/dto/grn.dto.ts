@@ -1,10 +1,11 @@
 import { PartialType } from '@nestjs/mapped-types';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   IsArray, IsDateString, IsEnum, IsNumber, IsOptional,
   IsString, IsUUID, Min, ValidateNested,
 } from 'class-validator';
 import { GrnCondition, GrnStatus } from '../entities/grn-document.entity';
+import { joinSerials } from '../../common/utils/serial-numbers';
 
 export class GrnItemDto {
   @IsOptional() @IsString()
@@ -22,8 +23,11 @@ export class GrnItemDto {
   @IsOptional() @IsNumber() @Min(0)
   receivedQty?: number;
 
-  @IsOptional() @IsString()
-  serialNumber?: string;
+  // A line covering several units may carry one serial per unit, so the client
+  // is free to send an array; it is flattened to the stored comma-separated form
+  // before validation.
+  @IsOptional() @Transform(({ value }) => joinSerials(value)) @IsString()
+  serialNumber?: string | string[];
 
   @IsOptional() @IsUUID()
   productId?: string;

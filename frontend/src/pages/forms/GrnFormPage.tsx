@@ -25,7 +25,10 @@ const COLUMNS: LineColumn[] = [
   { key: 'unit', label: 'Unit of Measure', width: '11%' },
   { key: 'orderedQty', label: 'Ordered Qty', type: 'number', width: '10%' },
   { key: 'receivedQty', label: 'Received Qty', type: 'number', width: '10%' },
-  { key: 'serialNumber', label: 'Serial Number', width: '18%' },
+  {
+    key: 'serialNumber', label: 'Serial Number(s)', type: 'serial', qtyKey: 'receivedQty',
+    width: '18%', hint: 'Serial Number(s) — enter one for the line, or one per unit received',
+  },
 ];
 
 export default function GrnFormPage() {

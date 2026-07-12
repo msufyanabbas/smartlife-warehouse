@@ -36,7 +36,10 @@ const COLUMNS: LineColumn[] = [
     // Cannot issue more than the storekeeper approved, nor more than exists.
     max: row => Math.min(row.qtyApproved || 0, row.stockAvailable || 0) || undefined,
   },
-  { key: 'serialNumber', label: 'Serial Number', width: '14%' },
+  {
+    key: 'serialNumber', label: 'Serial Number(s)', type: 'serial', qtyKey: 'qtyIssued',
+    width: '14%', hint: 'Serial Number(s) — enter one for the line, or one per unit issued',
+  },
 ];
 
 export default function AssignmentFormPage() {
@@ -196,8 +199,19 @@ function AssignmentEditor({ id, doc, onClose, onCreated }: {
   const save = async (status: AssignmentForm['status']) => {
     // Issuing moves real stock out of `available`, and the backend only does it
     // on the draft/approved → issued transition, so make it a deliberate click.
+    // The two checks below are what the backend enforces — an issue with no
+    // recipient or no quantity books nothing out, and would leave the stock
+    // report's Assigned column reading zero against an issued document.
     if (status === 'issued' && !alreadyIssued) {
       const total = rows.reduce((sum, r) => sum + (Number(r.qtyIssued) || 0), 0);
+      if (!form.assignedToId) {
+        toast.error('Select who the items are assigned to before issuing.');
+        return;
+      }
+      if (!total) {
+        toast.error('Enter a Qty Issued on at least one line before issuing.');
+        return;
+      }
       const confirmed = window.confirm(
         `Issue ${total} unit(s)? This deducts the issued quantities from available inventory.`,
       );

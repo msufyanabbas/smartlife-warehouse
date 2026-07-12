@@ -500,8 +500,14 @@ const onDocumentSaved = (qc: ReturnType<typeof useQueryClient>, resource: string
   qc.invalidateQueries({ queryKey: ['inventory-stats'] });
   // Completing a GRN stamps grnId onto inventory rows, so the receipts feed moves too.
   if (resource === 'grn') qc.invalidateQueries({ queryKey: ['grn-receipts'] });
-  // Issuing an assignment form opens assignment records.
-  if (resource === 'assignment-forms') qc.invalidateQueries({ queryKey: ['assignments'] });
+  // Issuing an assignment form opens assignment records. `assignments-history` is
+  // a separate key, not a child of `assignments`, so it has to be named — the
+  // stock report reads it, and without this its Assigned column stays stale.
+  if (resource === 'assignment-forms') {
+    qc.invalidateQueries({ queryKey: ['assignments'] });
+    qc.invalidateQueries({ queryKey: ['assignments-history'] });
+    qc.invalidateQueries({ queryKey: ['my-inventory'] });
+  }
 };
 
 // The API collapses field-level validation failures into a bare "Validation

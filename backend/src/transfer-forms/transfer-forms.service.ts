@@ -11,6 +11,7 @@ import {
 } from './dto/transfer-form.dto';
 import { InventoryItem } from '../inventory/entities/inventory-item.entity';
 import { generateRefNumber } from '../common/utils/generate-ref-number';
+import { joinSerials } from '../common/utils/serial-numbers';
 
 @Injectable()
 export class TransferFormsService {
@@ -98,7 +99,7 @@ function normalizeItems(items?: TransferFormItemDto[]): TransferFormLineItem[] {
       unit: i.unit ?? '',
       stockQty: i.stockQty ?? 0,
       qtyToTransfer: i.qtyToTransfer ?? 0,
-      serialNumber: i.serialNumber ?? '',
+      serialNumber: joinSerials(i.serialNumber),
       itemId: i.itemId,
     }));
 }

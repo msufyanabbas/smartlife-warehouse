@@ -3,6 +3,8 @@ import * as XLSX from 'xlsx';
 import { BarChart2, Download, Search, Filter } from 'lucide-react';
 import { format, startOfMonth, endOfMonth, subMonths } from 'date-fns';
 import { useInventory, useItemUsage, useGrnList, useAssignmentHistory } from '../hooks/useApi';
+import MultiSelect from '../components/MultiSelect';
+import SerialNumbers from '../components/SerialNumbers';
 import AssignedUsedReport from './AssignedUsedReport';
 
 interface InventoryItem {
@@ -127,8 +129,8 @@ function StockMovementReport() {
   const [dateFrom, setDateFrom] = useState(format(startOfMonth(new Date()), 'yyyy-MM-dd'));
   const [dateTo, setDateTo] = useState(today);
   const [search, setSearch] = useState('');
-  const [schemeFilter, setSchemeFilter] = useState('');
-  const [categoryFilter, setCategoryFilter] = useState('');
+  const [schemeFilters, setSchemeFilters] = useState<string[]>([]);
+  const [categoryFilters, setCategoryFilters] = useState<string[]>([]);
 
   const list = items as InventoryItem[];
   const usage = usageData as UsageRecord[];
@@ -222,8 +224,9 @@ function StockMovementReport() {
       .filter(item => {
         const q = search.toLowerCase();
         const matchSearch = !q || item.name.toLowerCase().includes(q) || item.sku.toLowerCase().includes(q) || item.serialNumber?.toLowerCase().includes(q) || item.schemeNo?.toLowerCase().includes(q);
-        const matchScheme = !schemeFilter || item.schemeNo === schemeFilter;
-        const matchCat = !categoryFilter || item.category === categoryFilter;
+        // No selection means "every scheme", not "no scheme".
+        const matchScheme = !schemeFilters.length || schemeFilters.includes(item.schemeNo || '');
+        const matchCat = !categoryFilters.length || categoryFilters.includes(item.category || '');
         return matchSearch && matchScheme && matchCat;
       })
       .map(item => {
@@ -281,7 +284,7 @@ function StockMovementReport() {
           closing,
         };
       });
-  }, [list, usage, assignments, receiptsByItem, dateFrom, dateTo, search, schemeFilter, categoryFilter]);
+  }, [list, usage, assignments, receiptsByItem, dateFrom, dateTo, search, schemeFilters, categoryFilters]);
 
   // Totals
   const totals = useMemo(() => ({
@@ -340,12 +343,12 @@ function StockMovementReport() {
   };
 
   const clearFilters = () => {
-    setSearch(''); setSchemeFilter(''); setCategoryFilter('');
+    setSearch(''); setSchemeFilters([]); setCategoryFilters([]);
     // Reset dates to this month default, not empty (empty breaks date formatting)
     setDateFrom(format(startOfMonth(new Date()), 'yyyy-MM-dd'));
     setDateTo(today);
   };
-  const hasFilters = search || schemeFilter || categoryFilter;
+  const hasFilters = !!search || schemeFilters.length > 0 || categoryFilters.length > 0;
 
   const statCard = (label: string, value: number, color: string, bg: string) => (
     <div style={{ flex: 1, background: bg, border: `1px solid ${color}33`, borderRadius: 'var(--radius-lg)', padding: '16px 20px' }}>
@@ -390,20 +393,32 @@ function StockMovementReport() {
             <Search size={14} />
             <input placeholder="Search product, SKU, serial, scheme…" value={search} onChange={e => setSearch(e.target.value)} />
           </div>
-          <select className="form-input" value={schemeFilter} onChange={e => setSchemeFilter(e.target.value)}>
-            <option value="">All Schemes</option>
-            {schemeOptions.map(s => <option key={s} value={s}>{s}</option>)}
-          </select>
-          <select className="form-input" value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)}>
-            <option value="">All Categories</option>
-            {categoryOptions.map(c => <option key={c} value={c}>{c}</option>)}
-          </select>
+          <MultiSelect
+            options={schemeOptions}
+            selected={schemeFilters}
+            onChange={setSchemeFilters}
+            placeholder="All Schemes"
+          />
+          <MultiSelect
+            options={categoryOptions}
+            selected={categoryFilters}
+            onChange={setCategoryFilters}
+            placeholder="All Categories"
+          />
           {hasFilters && (
             <button className="btn btn-ghost btn-sm" onClick={clearFilters}>
               <Filter size={13} /> Clear
             </button>
           )}
         </div>
+
+        {hasFilters && (
+          <div style={{ marginTop: 10, fontSize: 12, color: 'var(--text-3)' }}>
+            Showing <strong style={{ color: 'var(--text)' }}>{reportRows.length}</strong> of {list.length} items
+            {schemeFilters.length > 0 && ` · Schemes: ${schemeFilters.join(', ')}`}
+            {categoryFilters.length > 0 && ` · Categories: ${categoryFilters.join(', ')}`}
+          </div>
+        )}
       </div>
 
       {/* Summary Cards */}
@@ -450,8 +465,8 @@ function StockMovementReport() {
                         {row.sku}
                       </code>
                     </td>
-                    <td style={{ fontSize: 12, color: 'var(--text-2)', fontFamily: 'monospace' }}>
-                      {row.serialNumber || '—'}
+                    <td style={{ fontSize: 12, color: 'var(--text-2)' }}>
+                      <SerialNumbers value={row.serialNumber} />
                     </td>
                     <td style={{ fontSize: 12, color: 'var(--text-2)' }}>{row.schemeNo || '—'}</td>
                     <td style={{ fontSize: 12 }}>

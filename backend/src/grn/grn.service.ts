@@ -7,6 +7,7 @@ import {
 import { CreateGrnDto, GrnItemDto, UpdateGrnDto } from './dto/grn.dto';
 import { InventoryItem, ItemCondition } from '../inventory/entities/inventory-item.entity';
 import { generateRefNumber } from '../common/utils/generate-ref-number';
+import { joinSerials } from '../common/utils/serial-numbers';
 
 @Injectable()
 export class GrnService {
@@ -137,7 +138,7 @@ function normalizeItems(items?: GrnItemDto[]): GrnLineItem[] {
       unit: i.unit ?? '',
       orderedQty: i.orderedQty ?? 0,
       receivedQty: i.receivedQty ?? 0,
-      serialNumber: i.serialNumber ?? '',
+      serialNumber: joinSerials(i.serialNumber),
       productId: i.productId,
     }));
 }

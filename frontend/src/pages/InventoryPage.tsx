@@ -9,6 +9,7 @@ import {
 import { useAuth } from '../contexts/AuthContext';
 import Modal from '../components/Modal';
 import FloatingDropdown from '../components/FloatingDropdown';
+import MultiSelect from '../components/MultiSelect';
 
 interface Product {
   id: string; name: string; sku: string; description?: string;
@@ -299,8 +300,8 @@ export default function InventoryPage() {
 
   // ── Filters ──────────────────────────────────────────────────────────────
   const [search, setSearch] = useState('');
-  const [schemeFilter, setSchemeFilter] = useState('');
-  const [categoryFilter, setCategoryFilter] = useState('');
+  const [schemeFilters, setSchemeFilters] = useState<string[]>([]);
+  const [categoryFilters, setCategoryFilters] = useState<string[]>([]);
   const [conditionFilter, setConditionFilter] = useState('');
   const [stockFilter, setStockFilter] = useState('');
   const [dateFrom, setDateFrom] = useState('');
@@ -342,8 +343,9 @@ export default function InventoryPage() {
     const matchSearch = !q || i.name.toLowerCase().includes(q) || i.sku.toLowerCase().includes(q) ||
       i.schemeNo?.toLowerCase().includes(q) || i.projectName?.toLowerCase().includes(q) ||
       i.serialNumber?.toLowerCase().includes(q) || i.purchaseOrder?.toLowerCase().includes(q);
-    const matchScheme = !schemeFilter || i.schemeNo === schemeFilter;
-    const matchCat = !categoryFilter || i.category === categoryFilter;
+    // No selection means "every scheme", not "no scheme".
+    const matchScheme = !schemeFilters.length || schemeFilters.includes(i.schemeNo || '');
+    const matchCat = !categoryFilters.length || categoryFilters.includes(i.category || '');
     const matchCond = !conditionFilter || i.condition === conditionFilter;
     const matchStock = !stockFilter ||
       (stockFilter === 'in' && i.availableQuantity > 0) ||
@@ -353,7 +355,7 @@ export default function InventoryPage() {
     const matchFrom = !dateFrom || itemDate >= new Date(dateFrom + 'T00:00:00');
     const matchTo = !dateTo || itemDate <= new Date(dateTo + 'T23:59:59');
     return matchSearch && matchScheme && matchCat && matchCond && matchStock && matchFrom && matchTo;
-  }), [list, search, schemeFilter, categoryFilter, conditionFilter, stockFilter, dateFrom, dateTo]);
+  }), [list, search, schemeFilters, categoryFilters, conditionFilter, stockFilter, dateFrom, dateTo]);
 
   const grouped = useMemo(() => {
     const map = new Map<string, InventoryItem[]>();
@@ -486,10 +488,11 @@ export default function InventoryPage() {
   };
 
   const clearFilters = () => {
-    setSearch(''); setSchemeFilter(''); setCategoryFilter('');
+    setSearch(''); setSchemeFilters([]); setCategoryFilters([]);
     setConditionFilter(''); setStockFilter(''); setDateFrom(''); setDateTo('');
   };
-  const hasFilters = search || schemeFilter || categoryFilter || conditionFilter || stockFilter || dateFrom || dateTo;
+  const hasFilters = !!search || schemeFilters.length > 0 || categoryFilters.length > 0 ||
+    !!conditionFilter || !!stockFilter || !!dateFrom || !!dateTo;
   const today = new Date().toISOString().split('T')[0];
 
   return (
@@ -524,14 +527,18 @@ export default function InventoryPage() {
             <Search size={14} />
             <input placeholder="Search name, SKU, serial, PO, scheme…" value={search} onChange={e => setSearch(e.target.value)} />
           </div>
-          <select className="form-input" value={schemeFilter} onChange={e => setSchemeFilter(e.target.value)}>
-            <option value="">All Schemes</option>
-            {schemeOptions.map(s => <option key={s} value={s}>{s}</option>)}
-          </select>
-          <select className="form-input" value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)}>
-            <option value="">All Categories</option>
-            {categoryOptions.map(c => <option key={c} value={c}>{c}</option>)}
-          </select>
+          <MultiSelect
+            options={schemeOptions}
+            selected={schemeFilters}
+            onChange={setSchemeFilters}
+            placeholder="All Schemes"
+          />
+          <MultiSelect
+            options={categoryOptions}
+            selected={categoryFilters}
+            onChange={setCategoryFilters}
+            placeholder="All Categories"
+          />
           <select className="form-input" value={conditionFilter} onChange={e => setConditionFilter(e.target.value)}>
             <option value="">All Conditions</option>
             {['new', 'good', 'fair', 'poor'].map(c => (
@@ -559,6 +566,8 @@ export default function InventoryPage() {
         {hasFilters && (
           <div style={{ marginTop: 8, fontSize: 12, color: 'var(--text-3)' }}>
             Showing <strong style={{ color: 'var(--text)' }}>{filtered.length}</strong> of {list.length} items
+            {schemeFilters.length > 0 && ` · Schemes: ${schemeFilters.join(', ')}`}
+            {categoryFilters.length > 0 && ` · Categories: ${categoryFilters.join(', ')}`}
           </div>
         )}
       </div>
@@ -645,7 +654,7 @@ export default function InventoryPage() {
                               </td>
                               <td style={{ width: 90 }}><code style={{ fontSize: 11, background: 'var(--bg-3)', padding: '2px 6px', borderRadius: 4, color: 'var(--accent)' }}>{item.sku}</code></td>
                               {!compactView && (
-                                <td style={{ fontSize: 12, color: 'var(--text-2)', fontFamily: 'monospace', width: 100, maxWidth: 100, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                <td title={item.serialNumber || undefined} style={{ fontSize: 12, color: 'var(--text-2)', fontFamily: 'monospace', width: 100, maxWidth: 100, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                   {item.serialNumber || '—'}
                                 </td>
                               )}

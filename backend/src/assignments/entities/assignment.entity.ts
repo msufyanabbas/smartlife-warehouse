@@ -51,6 +51,10 @@ export class Assignment {
   @Column({ nullable: true })
   notes: string;
 
+  /** Set when the assignment was opened by issuing an assignment form (ASN). */
+  @Column({ nullable: true })
+  assignmentFormId: string;
+
   @Column({ nullable: true })
   returnedAt: Date;
 

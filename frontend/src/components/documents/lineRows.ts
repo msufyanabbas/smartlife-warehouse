@@ -3,7 +3,8 @@ export interface LineRow {
   itemCode: string;
   itemDescription: string;
   unit: string;
-  serialNumber: string;
+  /** One serial for the whole line, or one per unit while it is being edited. */
+  serialNumber: string | string[];
   itemId?: string;
   productId?: string;
   [key: string]: any;
@@ -12,12 +13,29 @@ export interface LineRow {
 export interface LineColumn {
   key: string;
   label: string;
-  /** `readonly` cells are auto-filled from the catalog and not editable. */
-  type?: 'text' | 'number' | 'readonly';
+  /**
+   * `readonly` cells are auto-filled from the catalog and not editable;
+   * `serial` cells take one serial per unit once the line's quantity exceeds 1.
+   */
+  type?: 'text' | 'number' | 'readonly' | 'serial';
   width?: string;
   /** Upper bound for number cells, e.g. cannot transfer more than stock. */
   max?: (row: LineRow) => number | undefined;
+  /** For `serial` cells: the row key holding the unit count the serials cover. */
+  qtyKey?: string;
+  /** Tooltip on the column header. */
+  hint?: string;
 }
+
+/**
+ * Serials round-trip as a single comma-separated string (what the backend stores
+ * and every list, print view and export reads), but are edited as one value per
+ * unit. Both shapes are read through this.
+ */
+export const splitSerials = (value: string | string[] | undefined): string[] =>
+  (Array.isArray(value) ? value : String(value ?? '').split(','))
+    .map(serial => serial.trim())
+    .filter(Boolean);
 
 let keyCounter = 0;
 const nextKey = () => `row-${keyCounter++}`;

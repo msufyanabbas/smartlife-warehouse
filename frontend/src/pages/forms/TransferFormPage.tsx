@@ -26,7 +26,10 @@ const COLUMNS: LineColumn[] = [
   { key: 'unit', label: 'Unit', width: '8%' },
   { key: 'stockQty', label: 'Stock Qty (From)', type: 'readonly', width: '11%' },
   { key: 'qtyToTransfer', label: 'Qty to Transfer', type: 'number', width: '11%', max: row => row.stockQty || undefined },
-  { key: 'serialNumber', label: 'Serial Number', width: '17%' },
+  {
+    key: 'serialNumber', label: 'Serial Number(s)', type: 'serial', qtyKey: 'qtyToTransfer',
+    width: '17%', hint: 'Serial Number(s) — enter one for the line, or one per unit transferred',
+  },
 ];
 
 export default function TransferFormPage() {

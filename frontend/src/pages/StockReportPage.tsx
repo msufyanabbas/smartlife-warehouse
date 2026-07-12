@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react';
 import * as XLSX from 'xlsx';
 import { BarChart2, Download, Search, Filter } from 'lucide-react';
 import { format, startOfMonth, endOfMonth, subMonths } from 'date-fns';
-import { useInventory, useItemUsage, useAssignments } from '../hooks/useApi';
+import { useInventory, useItemUsage, useGrnList } from '../hooks/useApi';
 import AssignedUsedReport from './AssignedUsedReport';
 
 interface InventoryItem {
@@ -20,6 +20,16 @@ interface UsageRecord {
   item?: { name: string; sku: string };
 }
 
+interface GrnLineItem {
+  itemCode: string; itemDescription: string; receivedQty: number;
+}
+
+interface GrnDocument {
+  id: string; grnNo: string; schemeNo?: string; status: string;
+  dateOfReceipt?: string; createdAt: string;
+  items?: GrnLineItem[];
+}
+
 interface StockRow {
   itemId: string;
   name: string;
@@ -30,9 +40,24 @@ interface StockRow {
   category: string;
   opening: number;
   received: number;
+  assigned: number;
   issued: number;
   closing: number;
 }
+
+/**
+ * `dateOfReceipt` is a DATE column, so it arrives as a bare 'YYYY-MM-DD' string.
+ * `new Date()` would read that as UTC midnight and shift it a day in negative
+ * offsets, so anchor it to local midnight instead. Full timestamps pass through.
+ */
+function parseDate(value: string): Date {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value)
+    ? new Date(`${value}T00:00:00`)
+    : new Date(value);
+}
+
+const matchKey = (sku?: string, schemeNo?: string) =>
+  `${(sku || '').trim().toLowerCase()}|${(schemeNo || '').trim().toLowerCase()}`;
 
 const QUICK_RANGES = [
   { label: 'This Month', getValue: () => ({ from: format(startOfMonth(new Date()), 'yyyy-MM-dd'), to: format(endOfMonth(new Date()), 'yyyy-MM-dd') }) },
@@ -75,7 +100,7 @@ export default function StockReportPage() {
 function StockMovementReport() {
   const { data: items = [] } = useInventory();
   const { data: usageData = [] } = useItemUsage();
-  const { data: assignments = [] } = useAssignments();
+  const { data: grnData = [] } = useGrnList();
 
   const today = new Date().toISOString().split('T')[0];
   const [dateFrom, setDateFrom] = useState(format(startOfMonth(new Date()), 'yyyy-MM-dd'));
@@ -86,9 +111,58 @@ function StockMovementReport() {
 
   const list = items as InventoryItem[];
   const usage = usageData as UsageRecord[];
+  const grns = grnData as GrnDocument[];
 
   const schemeOptions = useMemo(() => [...new Set(list.map(i => i.schemeNo).filter(Boolean))].sort() as string[], [list]);
   const categoryOptions = useMemo(() => [...new Set(list.map(i => i.category).filter(Boolean))].sort() as string[], [list]);
+
+  /**
+   * How much stock each inventory row formally received via GRN inside the period.
+   *
+   * This has to come from the GRN documents themselves, not from the row's
+   * quantity. An inventory row accumulates stock from several sources — manual
+   * adds (which upsert onto an existing SKU) and any number of GRNs — but only
+   * ever remembers the *last* GRN that touched it. Reading `totalQuantity` as
+   * "received" therefore credits the whole row, pre-existing stock included, to
+   * that one GRN.
+   *
+   * A GRN line is attributed to the row it would have topped up: SKU + scheme
+   * first, mirroring the backend's upsert, then SKU alone to catch rows whose
+   * scheme was edited after receipt. Each line lands on exactly one row, so a
+   * receipt is never counted twice.
+   */
+  const receivedByItem = useMemo(() => {
+    const from = dateFrom ? new Date(dateFrom + 'T00:00:00') : new Date('2000-01-01T00:00:00');
+    const to = dateTo ? new Date(dateTo + 'T23:59:59') : new Date();
+
+    const bySkuAndScheme = new Map<string, string>();
+    const bySku = new Map<string, string>();
+    for (const item of list) {
+      const skuScheme = matchKey(item.sku, item.schemeNo);
+      if (!bySkuAndScheme.has(skuScheme)) bySkuAndScheme.set(skuScheme, item.id);
+      const sku = matchKey(item.sku);
+      if (!bySku.has(sku)) bySku.set(sku, item.id);
+    }
+
+    const received = new Map<string, number>();
+    for (const grn of grns) {
+      // Drafts have not entered inventory yet.
+      if (grn.status !== 'completed') continue;
+
+      const receiptDate = parseDate(grn.dateOfReceipt || grn.createdAt);
+      if (receiptDate < from || receiptDate > to) continue;
+
+      for (const line of grn.items ?? []) {
+        if (!line.itemCode?.trim() || line.receivedQty <= 0) continue;
+        const itemId = bySkuAndScheme.get(matchKey(line.itemCode, grn.schemeNo))
+          ?? bySku.get(matchKey(line.itemCode));
+        // A GRN whose stock was since deleted from inventory has no row to sit on.
+        if (!itemId) continue;
+        received.set(itemId, (received.get(itemId) ?? 0) + line.receivedQty);
+      }
+    }
+    return received;
+  }, [list, grns, dateFrom, dateTo]);
 
   // Build stock report rows
   const reportRows = useMemo((): StockRow[] => {
@@ -103,9 +177,6 @@ function StockMovementReport() {
         const matchCat = !categoryFilter || item.category === categoryFilter;
         return matchSearch && matchScheme && matchCat;
       })
-      // Only items backed by a formal GRN document belong in the stock report.
-      // Stock added directly to inventory (no GRN) is undocumented and excluded.
-      .filter(item => !!item.grnId)
       .map(item => {
         // recordUsage() deducts consumption from totalQuantity, so the stored
         // total is stock as of *now*. Rewind it by re-adding usage logged after
@@ -117,40 +188,18 @@ function StockMovementReport() {
         const issuedInPeriod = usageFor(d => d >= from && d <= to);
         const issuedAfterPeriod = usageFor(d => d > to);
 
-        // Receipt date for the GRN-backed stock: prefer the explicit receipt
-        // timestamp, otherwise fall back to when the GRN-linked row was created.
-        const receiptDate = item.receivedAt
-          ? new Date(item.receivedAt)
-          : item.grnId
-            ? new Date(item.createdAt)
-            : null;
-
-        // Received in period = has GRN AND receipt date falls within period.
-        const receivedInPeriod = !!(
-          item.grnId &&
-          receiptDate &&
-          receiptDate >= from &&
-          receiptDate <= to
-        );
-
-        // Opening = has GRN AND receipt date is BEFORE the period started.
-        const grnBeforePeriod = !!(
-          item.grnId &&
-          receiptDate &&
-          receiptDate < from
-        );
-
-        // Rewinding in-period and post-period usage gives the quantity the item
-        // held before anything was drawn down — its receipt quantity.
+        // Rewinding in-period and post-period usage gives what the row held at
+        // the close of the period, before anything was drawn down within it.
         const stockBeforeIssues = item.totalQuantity + issuedInPeriod + issuedAfterPeriod;
 
-        // Received quantity — GRN-backed stock receipted in this period.
-        const received = receivedInPeriod ? stockBeforeIssues : 0;
-        // Opening stock — GRN-backed stock that existed before this period.
-        const opening = grnBeforePeriod ? Math.max(0, stockBeforeIssues) : 0;
-        // Closing = Opening + Received − Issued.
+        // Received — only what a GRN formally receipted inside this period.
+        const received = Math.min(receivedByItem.get(item.id) ?? 0, stockBeforeIssues);
+        // Opening — everything else the row was already carrying: stock added
+        // manually (no GRN) and stock receipted in an earlier period alike.
+        const opening = Math.max(0, stockBeforeIssues - received);
+        // Assigned stock is still in stock, just held by a worker, so it does
+        // not reduce Closing — only consumption (Issued) does.
         const closing = Math.max(0, opening + received - issuedInPeriod);
-        const issued = issuedInPeriod;
 
         return {
           itemId: item.id,
@@ -162,16 +211,18 @@ function StockMovementReport() {
           category: item.category || '',
           opening,
           received,
-          issued,
-          closing: Math.max(0, closing),
+          assigned: item.assignedQuantity,
+          issued: issuedInPeriod,
+          closing,
         };
       });
-  }, [list, usage, dateFrom, dateTo, search, schemeFilter, categoryFilter]);
+  }, [list, usage, receivedByItem, dateFrom, dateTo, search, schemeFilter, categoryFilter]);
 
   // Totals
   const totals = useMemo(() => ({
     opening: reportRows.reduce((s, r) => s + r.opening, 0),
     received: reportRows.reduce((s, r) => s + r.received, 0),
+    assigned: reportRows.reduce((s, r) => s + r.assigned, 0),
     issued: reportRows.reduce((s, r) => s + r.issued, 0),
     closing: reportRows.reduce((s, r) => s + r.closing, 0),
   }), [reportRows]);
@@ -192,6 +243,7 @@ function StockMovementReport() {
       'Category': r.category,
       'Opening': r.opening,
       'Received': r.received,
+      'Assigned': r.assigned,
       'Issued': r.issued,
       'Closing': r.closing,
     }));
@@ -206,6 +258,7 @@ function StockMovementReport() {
       'Category': '',
       'Opening': totals.opening,
       'Received': totals.received,
+      'Assigned': totals.assigned,
       'Issued': totals.issued,
       'Closing': totals.closing,
     });
@@ -292,6 +345,7 @@ function StockMovementReport() {
       <div style={{ display: 'flex', gap: 12, marginBottom: 24 }}>
         {statCard('Opening Stock', totals.opening, 'var(--text)', 'var(--bg-2)')}
         {statCard('Received', totals.received, 'var(--green)', 'var(--green-dim)')}
+        {statCard('Assigned', totals.assigned, 'var(--purple)', 'var(--purple-dim)')}
         {statCard('Issued / Used', totals.issued, 'var(--yellow)', 'var(--yellow-dim)')}
         {statCard('Closing Stock', totals.closing, 'var(--accent)', 'var(--accent-dim)')}
       </div>
@@ -315,6 +369,7 @@ function StockMovementReport() {
                 <th>Category</th>
                 <th style={{ textAlign: 'center', background: 'var(--bg-3)' }}>Opening</th>
                 <th style={{ textAlign: 'center', color: 'var(--green)' }}>Received</th>
+                <th style={{ textAlign: 'center', color: 'var(--purple)' }}>Assigned</th>
                 <th style={{ textAlign: 'center', color: 'var(--yellow)' }}>Issued</th>
                 <th style={{ textAlign: 'center', color: 'var(--accent)' }}>Closing</th>
               </tr>
@@ -344,6 +399,9 @@ function StockMovementReport() {
                     <td style={{ textAlign: 'center', fontWeight: 700, color: row.received > 0 ? 'var(--green)' : 'var(--text-3)' }}>
                       {row.received > 0 ? `+${row.received}` : '—'}
                     </td>
+                    <td style={{ textAlign: 'center', fontWeight: 700, color: row.assigned > 0 ? 'var(--purple)' : 'var(--text-3)' }}>
+                      {row.assigned > 0 ? row.assigned : '—'}
+                    </td>
                     <td style={{ textAlign: 'center', fontWeight: 700, color: row.issued > 0 ? 'var(--yellow)' : 'var(--text-3)' }}>
                       {row.issued > 0 ? `-${row.issued}` : '—'}
                     </td>
@@ -362,6 +420,7 @@ function StockMovementReport() {
                 </td>
                 <td style={{ textAlign: 'center', padding: '10px 16px' }}>{totals.opening}</td>
                 <td style={{ textAlign: 'center', padding: '10px 16px', color: 'var(--green)' }}>+{totals.received}</td>
+                <td style={{ textAlign: 'center', padding: '10px 16px', color: 'var(--purple)' }}>{totals.assigned}</td>
                 <td style={{ textAlign: 'center', padding: '10px 16px', color: 'var(--yellow)' }}>-{totals.issued}</td>
                 <td style={{ textAlign: 'center', padding: '10px 16px', color: 'var(--accent)', fontSize: 16 }}>{totals.closing}</td>
               </tr>
@@ -373,7 +432,7 @@ function StockMovementReport() {
       {/* Legend */}
       <div style={{ marginTop: 16, padding: '12px 16px', background: 'var(--bg-2)', borderRadius: 'var(--radius)', border: '1px solid var(--border)', fontSize: 12, color: 'var(--text-3)' }}>
         <strong style={{ color: 'var(--text-2)' }}>How it works:</strong>
-        {' '}Opening = stock receipted via GRN before this period · Received = stock receipted via GRN within this period · Issued = items consumed/used in this period · Closing = Opening + Received − Issued · Items with no GRN document are excluded from this report
+        {' '}Opening = existing stock (added manually, or receipted via GRN before this period) · Received = stock formally receipted via GRN within this period · Assigned = stock currently held by workers (still in stock, so it does not reduce Closing) · Issued = items consumed/used in this period · Closing = Opening + Received − Issued
       </div>
     </div>
   );

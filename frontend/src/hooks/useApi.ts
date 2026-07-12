@@ -497,8 +497,12 @@ const onDocumentSaved = (qc: ReturnType<typeof useQueryClient>, resource: string
   if (resource === 'assignment-forms') qc.invalidateQueries({ queryKey: ['assignments'] });
 };
 
-const documentError = (fallback: string) => (e: any) =>
-  toast.error(e.response?.data?.message || fallback);
+// The API collapses field-level validation failures into a bare "Validation
+// failed" and puts the detail in `errors`, so surface that instead.
+const documentError = (fallback: string) => (e: any) => {
+  const { errors, message } = e.response?.data ?? {};
+  toast.error(Array.isArray(errors) && errors.length ? errors.join(', ') : message || fallback);
+};
 
 // GRN
 export const useGrnList = () =>

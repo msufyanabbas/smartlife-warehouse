@@ -327,6 +327,7 @@ function TransferEditor({ id, doc, onClose, onCreated }: {
           columns={COLUMNS}
           source="inventory"
           filterStock={filterStock}
+          stockField="stockQty"
           minRows={MIN_ROWS}
           newRowDefaults={ROW_DEFAULTS}
           totalKey="qtyToTransfer"

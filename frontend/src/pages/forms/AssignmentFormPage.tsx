@@ -316,6 +316,7 @@ function AssignmentEditor({ id, doc, onClose, onCreated }: {
           onChange={setRows}
           columns={COLUMNS}
           source="inventory"
+          stockField="stockAvailable"
           minRows={MIN_ROWS}
           newRowDefaults={ROW_DEFAULTS}
           totalKey="qtyIssued"

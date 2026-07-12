@@ -18,13 +18,14 @@ interface StockItem {
 }
 
 // ── Item code autocomplete ─────────────────────────────────────────────────
-function ItemCodePicker({ row, source, filterStock, onPick, readOnly, usedIds }: {
+function ItemCodePicker({ row, source, filterStock, onPick, readOnly, usedIds, stockField }: {
   row: LineRow;
   source: 'products' | 'inventory';
   filterStock?: (item: StockItem) => boolean;
   onPick: (patch: Partial<LineRow>) => void;
   readOnly?: boolean;
   usedIds: string[];
+  stockField?: string;
 }) {
   const [query, setQuery] = useState(row.itemCode);
   const [open, setOpen] = useState(false);
@@ -60,6 +61,9 @@ function ItemCodePicker({ row, source, filterStock, onPick, readOnly, usedIds }:
     });
   };
 
+  // Each document names the on-hand figure differently (`stockAvailable` on an
+  // assignment, `stockQty` on a transfer) and the backend rejects any field its
+  // DTO does not declare, so write only the key this form actually asked for.
   const pickStock = (i: StockItem) => {
     setQuery(i.sku);
     setOpen(false);
@@ -69,8 +73,7 @@ function ItemCodePicker({ row, source, filterStock, onPick, readOnly, usedIds }:
       itemDescription: i.name,
       unit: i.product?.unit || '',
       serialNumber: i.serialNumber || '',
-      stockAvailable: i.availableQuantity,
-      stockQty: i.availableQuantity,
+      ...(stockField ? { [stockField]: i.availableQuantity } : {}),
     });
   };
 
@@ -80,7 +83,7 @@ function ItemCodePicker({ row, source, filterStock, onPick, readOnly, usedIds }:
     onPick({
       productId: undefined, itemId: undefined,
       itemCode: '', itemDescription: '', unit: '', serialNumber: '',
-      stockAvailable: 0, stockQty: 0,
+      ...(stockField ? { [stockField]: 0 } : {}),
     });
   };
 
@@ -178,7 +181,7 @@ const optionMeta: React.CSSProperties = {
 export default function LineItemsTable({
   rows, onChange, columns, source, filterStock,
   minRows = 15, readOnly = false, totalKey, totalLabel,
-  newRowDefaults = {},
+  newRowDefaults = {}, stockField,
 }: {
   rows: LineRow[];
   onChange: (rows: LineRow[]) => void;
@@ -190,6 +193,8 @@ export default function LineItemsTable({
   totalKey?: string;
   totalLabel?: string;
   newRowDefaults?: Record<string, any>;
+  /** Row key the picked item's on-hand quantity is written to, if the form shows one. */
+  stockField?: string;
 }) {
   const usedIds = rows.map(r => r.productId || r.itemId).filter(Boolean) as string[];
 
@@ -238,6 +243,7 @@ export default function LineItemsTable({
                       filterStock={filterStock}
                       readOnly={readOnly}
                       usedIds={usedIds}
+                      stockField={stockField}
                       onPick={patch => patchRow(index, patch)}
                     />
                   ) : (

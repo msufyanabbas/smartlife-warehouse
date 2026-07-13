@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react';
 import * as XLSX from 'xlsx';
 import { BarChart2, Download, Search, Filter } from 'lucide-react';
 import { format, startOfMonth, endOfMonth, subMonths } from 'date-fns';
-import { useInventory, useItemUsage, useGrnList, useAssignmentHistory } from '../hooks/useApi';
+import { useInventory, useItemUsage, useGrnList, useAssignmentHistory, useAssignmentForms } from '../hooks/useApi';
 import MultiSelect from '../components/MultiSelect';
 import SerialNumbers from '../components/SerialNumbers';
 import AssignedUsedReport from './AssignedUsedReport';
@@ -50,6 +50,16 @@ interface GrnDocument {
   id: string; grnNo: string; schemeNo?: string; status: string;
   dateOfReceipt?: string; createdAt: string;
   items?: GrnLineItem[];
+}
+
+interface AsnLineItem {
+  itemCode: string; itemDescription: string; qtyIssued: number; itemId?: string;
+}
+
+interface AsnDocument {
+  id: string; assignmentNo: string; status: string;
+  date?: string; createdAt: string;
+  items?: AsnLineItem[];
 }
 
 interface StockRow {
@@ -124,6 +134,7 @@ function StockMovementReport() {
   const { data: usageData = [] } = useItemUsage();
   const { data: grnData = [] } = useGrnList();
   const { data: assignmentData = [] } = useAssignmentHistory();
+  const { data: assignmentFormData = [] } = useAssignmentForms();
 
   const today = new Date().toISOString().split('T')[0];
   const [dateFrom, setDateFrom] = useState(format(startOfMonth(new Date()), 'yyyy-MM-dd'));
@@ -136,9 +147,29 @@ function StockMovementReport() {
   const usage = usageData as UsageRecord[];
   const grns = grnData as GrnDocument[];
   const assignments = assignmentData as AssignmentRecord[];
+  const asns = assignmentFormData as AsnDocument[];
 
   const schemeOptions = useMemo(() => [...new Set(list.map(i => i.schemeNo).filter(Boolean))].sort() as string[], [list]);
   const categoryOptions = useMemo(() => [...new Set(list.map(i => i.category).filter(Boolean))].sort() as string[], [list]);
+
+  /**
+   * Where a document line lands in inventory when it names a SKU but no row id.
+   * SKU + scheme first, mirroring the backend's upsert, then SKU alone to catch
+   * rows whose scheme was edited after the document was written.
+   */
+  const itemLookup = useMemo(() => {
+    const bySkuAndScheme = new Map<string, string>();
+    const bySku = new Map<string, string>();
+    const ids = new Set<string>();
+    for (const item of list) {
+      ids.add(item.id);
+      const skuScheme = matchKey(item.sku, item.schemeNo);
+      if (!bySkuAndScheme.has(skuScheme)) bySkuAndScheme.set(skuScheme, item.id);
+      const sku = matchKey(item.sku);
+      if (!bySku.has(sku)) bySku.set(sku, item.id);
+    }
+    return { bySkuAndScheme, bySku, ids };
+  }, [list]);
 
   /**
    * How much stock each inventory row formally received via GRN inside the period.
@@ -150,21 +181,10 @@ function StockMovementReport() {
    * "received" therefore credits the whole row, pre-existing stock included, to
    * that one GRN.
    *
-   * A GRN line is attributed to the row it would have topped up: SKU + scheme
-   * first, mirroring the backend's upsert, then SKU alone to catch rows whose
-   * scheme was edited after receipt. Each line lands on exactly one row, so a
-   * receipt is never counted twice.
+   * Each line lands on exactly one row, so a receipt is never counted twice.
    */
   const receiptsByItem = useMemo(() => {
-    const bySkuAndScheme = new Map<string, string>();
-    const bySku = new Map<string, string>();
-    for (const item of list) {
-      const skuScheme = matchKey(item.sku, item.schemeNo);
-      if (!bySkuAndScheme.has(skuScheme)) bySkuAndScheme.set(skuScheme, item.id);
-      const sku = matchKey(item.sku);
-      if (!bySku.has(sku)) bySku.set(sku, item.id);
-    }
-
+    const { bySkuAndScheme, bySku } = itemLookup;
     const receipts = new Map<string, { date: Date; qty: number }[]>();
     for (const grn of grns) {
       // Drafts have not entered inventory yet.
@@ -184,7 +204,46 @@ function StockMovementReport() {
       }
     }
     return receipts;
-  }, [list, grns]);
+  }, [itemLookup, grns]);
+
+  /**
+   * How much stock each inventory row has ever been issued out to a worker, read
+   * from the Assignment Form (ASN) documents rather than the `assignments` table.
+   *
+   * The ASN documents are the source of truth. Issuing a form is supposed to open
+   * an assignment row per line, but forms issued before that was enforced left
+   * none behind, so the assignments table under-reports historic hand-outs while
+   * the documents themselves still carry the full record in their `items` array.
+   *
+   * A line normally names its inventory row outright (`itemId`); lines saved
+   * before that was required, or pointing at stock since deleted, fall back to
+   * matching on item code.
+   *
+   * Deliberately not date-scoped: this is a running total of everything ever
+   * issued, not a movement inside the reporting period. Note that ASNs only
+   * record stock going *out* — returns and transfers are not documents — so this
+   * never decreases.
+   */
+  const assignedByItem = useMemo(() => {
+    const { bySku, ids } = itemLookup;
+    const assigned = new Map<string, number>();
+
+    for (const asn of asns) {
+      // Drafts and approved-but-unissued forms have not moved any stock yet.
+      if (asn.status !== 'issued') continue;
+
+      for (const line of asn.items ?? []) {
+        const qty = line.qtyIssued ?? 0;
+        if (qty <= 0) continue;
+        const itemId = line.itemId && ids.has(line.itemId)
+          ? line.itemId
+          : bySku.get(matchKey(line.itemCode));
+        if (!itemId) continue;
+        assigned.set(itemId, (assigned.get(itemId) ?? 0) + qty);
+      }
+    }
+    return assigned;
+  }, [itemLookup, asns]);
 
   // Build stock report rows
   const reportRows = useMemo((): StockRow[] => {
@@ -192,19 +251,24 @@ function StockMovementReport() {
     const to = dateTo ? new Date(dateTo + 'T23:59:59') : new Date();
 
     /**
-     * How much of an item was out with workers at instant `when`.
+     * How much of an item was out with workers at instant `when` — used to date the
+     * Opening balance back to the start of the period.
      *
      * `assignedQuantity` on the item is a live snapshot with no date on it, so it
      * cannot answer this for a past period — using it would let an assignment made
-     * today shrink last quarter's closing balance. The assignment rows do carry
+     * today shrink last quarter's opening balance. The assignment rows do carry
      * dates, so reconstruct from those: an assignment counts if it had been made by
      * `when` and had not been handed back yet. Logging usage draws stock down out of
      * the assignment, so usage recorded after `when` is added back.
      *
+     * This is the one figure still read from the assignments table, because it is
+     * the only source with dates on it. Forms issued before assignment rows were
+     * enforced are missing here, which understates what was out with workers at the
+     * period start and so overstates Opening. Fixing that properly needs a dated
+     * movement log; flagged, not solved.
+     *
      * Caveat: a *partial* return or transfer decrements the assignment in place
-     * without leaving a dated record, so it cannot be rewound. Periods that closed
-     * before one will understate what was out with workers, and overstate Closing to
-     * match. Fixing that properly needs a dated movement log; flagged, not solved.
+     * without leaving a dated record, so it cannot be rewound either.
      */
     const assignedOutAt = (itemId: string, when: Date) => assignments
       .filter(a => a.itemId === itemId)
@@ -255,19 +319,19 @@ function StockMovementReport() {
         const ownedAtEnd = item.totalQuantity + issuedAfterPeriod - receivedAfterPeriod;
         const ownedAtStart = ownedAtEnd + issuedInPeriod - received;
 
-        // Stock that was out with workers at each edge.
-        const assignedAtStart = assignedOutAt(item.id, from);
-        const assignedAtEnd = assignedOutAt(item.id, to);
+        // Opening is what physically sat in the warehouse when the period began:
+        // owned stock minus whatever workers were holding at that moment.
+        const opening = ownedAtStart - assignedOutAt(item.id, from);
 
-        // Opening and Closing are what physically sat in the warehouse: owned
-        // stock minus whatever workers were holding at that moment.
-        const opening = ownedAtStart - assignedAtStart;
-        const closing = ownedAtEnd - assignedAtEnd;
-        // So the column that balances the ledger is the *net* movement out to
-        // workers over the period, not the running total they hold today.
-        // Negative means more came back than went out.
-        const assigned = assignedAtEnd - assignedAtStart;
-        // opening + received − assigned − issued === closing, exactly.
+        // Everything ever issued out to a worker, per the ASN documents, falling
+        // back to the live snapshot on the row for stock assigned without one.
+        const assigned = assignedByItem.get(item.id) ?? item.assignedQuantity ?? 0;
+
+        // Assigned is an all-time running total while Opening, Received and Issued
+        // are period movements, so this is not a ledger that closes — a hand-out
+        // made before the period still draws Closing down. The floor keeps that
+        // mismatch from surfacing as a negative stock figure.
+        const closing = Math.max(0, opening + received - assigned - issuedInPeriod);
 
         return {
           itemId: item.id,
@@ -284,7 +348,7 @@ function StockMovementReport() {
           closing,
         };
       });
-  }, [list, usage, assignments, receiptsByItem, dateFrom, dateTo, search, schemeFilters, categoryFilters]);
+  }, [list, usage, assignments, receiptsByItem, assignedByItem, dateFrom, dateTo, search, schemeFilters, categoryFilters]);
 
   // Totals
   const totals = useMemo(() => ({
@@ -512,7 +576,7 @@ function StockMovementReport() {
       {/* Legend */}
       <div style={{ marginTop: 16, padding: '12px 16px', background: 'var(--bg-2)', borderRadius: 'var(--radius)', border: '1px solid var(--border)', fontSize: 12, color: 'var(--text-3)' }}>
         <strong style={{ color: 'var(--text-2)' }}>How it works:</strong>
-        {' '}Opening = stock in the warehouse when the period began · Received = stock formally receipted via GRN in this period · Assigned = net stock handed out to workers in this period (negative if more came back than went out) · Issued = stock consumed/used in this period · Closing = Opening + Received − Assigned − Issued = stock left in the warehouse. Stock held by workers is out of the warehouse but not yet consumed, so it reduces Closing without counting as Issued.
+        {' '}Opening = stock in the warehouse when the period began · Received = stock formally receipted via GRN in this period · Assigned = all stock ever handed out to workers on an issued Assignment Form (a running total, not limited to this period) · Issued = stock consumed/used in this period · Closing = Opening + Received − Assigned − Issued = stock left in the warehouse. Stock held by workers is out of the warehouse but not yet consumed, so it reduces Closing without counting as Issued.
       </div>
     </div>
   );

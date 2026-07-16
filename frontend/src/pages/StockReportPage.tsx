@@ -133,21 +133,32 @@ function StockMovementReport() {
 
   /**
    * Where a document line lands in inventory when it names a SKU but no row id.
-   * SKU + scheme first, mirroring the backend's upsert, then SKU alone to catch
-   * rows whose scheme was edited after the document was written.
+   *
+   * GRN id + SKU first: linkGrnToInventory() stamps the row it topped up with the
+   * GRN's id, so that stamp is a definitive record of where the stock actually
+   * went — it survives scheme edits and disambiguates duplicate SKUs, either of
+   * which make the name-based lookups below land a receipt on the wrong row.
+   * Then SKU + scheme, mirroring the backend's upsert, then SKU alone as a last
+   * resort. (A row only remembers the *last* GRN that touched it, so earlier
+   * receipts on the same row still need the name-based fallbacks.)
    */
   const itemLookup = useMemo(() => {
+    const byGrnAndSku = new Map<string, string>();
     const bySkuAndScheme = new Map<string, string>();
     const bySku = new Map<string, string>();
     const ids = new Set<string>();
     for (const item of list) {
       ids.add(item.id);
+      if (item.grnId) {
+        const grnSku = `${item.grnId}|${matchKey(item.sku)}`;
+        if (!byGrnAndSku.has(grnSku)) byGrnAndSku.set(grnSku, item.id);
+      }
       const skuScheme = matchKey(item.sku, item.schemeNo);
       if (!bySkuAndScheme.has(skuScheme)) bySkuAndScheme.set(skuScheme, item.id);
       const sku = matchKey(item.sku);
       if (!bySku.has(sku)) bySku.set(sku, item.id);
     }
-    return { bySkuAndScheme, bySku, ids };
+    return { byGrnAndSku, bySkuAndScheme, bySku, ids };
   }, [list]);
 
   /**
@@ -163,7 +174,7 @@ function StockMovementReport() {
    * Each line lands on exactly one row, so a receipt is never counted twice.
    */
   const receiptsByItem = useMemo(() => {
-    const { bySkuAndScheme, bySku } = itemLookup;
+    const { byGrnAndSku, bySkuAndScheme, bySku } = itemLookup;
     const receipts = new Map<string, { date: Date; qty: number }[]>();
     for (const grn of grns) {
       // Drafts have not entered inventory yet.
@@ -173,7 +184,8 @@ function StockMovementReport() {
 
       for (const line of grn.items ?? []) {
         if (!line.itemCode?.trim() || line.receivedQty <= 0) continue;
-        const itemId = bySkuAndScheme.get(matchKey(line.itemCode, grn.schemeNo))
+        const itemId = byGrnAndSku.get(`${grn.id}|${matchKey(line.itemCode)}`)
+          ?? bySkuAndScheme.get(matchKey(line.itemCode, grn.schemeNo))
           ?? bySku.get(matchKey(line.itemCode));
         // A GRN whose stock was since deleted from inventory has no row to sit on.
         if (!itemId) continue;
@@ -198,10 +210,10 @@ function StockMovementReport() {
    * before that was required, or pointing at stock since deleted, fall back to
    * matching on item code.
    *
-   * Each hand-out keeps the form's date so the report can scope Assigned to the
-   * period and rewind availableQuantity across period boundaries. Note that ASNs
-   * only record stock going *out* — returns and transfers are not documents — so
-   * a return made after the period cannot be rewound; flagged, not solved.
+   * Each hand-out keeps the form's date so Opening can be rewound over only the
+   * period's own hand-outs. Note that ASNs only record stock going *out* —
+   * returns and transfers are not documents — so a return inside the period
+   * cannot be rewound; flagged, not solved.
    */
   const assignmentsByItem = useMemo(() => {
     const { bySku, ids } = itemLookup;
@@ -243,45 +255,39 @@ function StockMovementReport() {
         return matchSearch && matchScheme && matchCat;
       })
       .map(item => {
-        // recordUsage() deducts consumption from totalQuantity, so the stored
-        // total is stock as of *now*. Rewind it by re-adding usage logged after
-        // each point in time we want to report on.
-        const usageFor = (match: (d: Date) => boolean) => usage
-          .filter(u => u.itemId === item.id && match(new Date(u.usedAt || u.createdAt)))
+        // Issued — only consumption logged inside this period.
+        const issuedInPeriod = usage
+          .filter(u => u.itemId === item.id)
+          .filter(u => {
+            const d = new Date(u.usedAt || u.createdAt);
+            return d >= from && d <= to;
+          })
           .reduce((s, u) => s + u.quantityUsed, 0);
 
-        const issuedInPeriod = usageFor(d => d >= from && d <= to);
-        const issuedAfterPeriod = usageFor(d => d > to);
-
-        const receiptsFor = (match: (d: Date) => boolean) => (receiptsByItem.get(item.id) ?? [])
-          .filter(r => match(r.date))
+        // Received — only what a GRN formally receipted inside this period.
+        const received = (receiptsByItem.get(item.id) ?? [])
+          .filter(r => r.date >= from && r.date <= to)
           .reduce((s, r) => s + r.qty, 0);
 
-        // Received — only what a GRN formally receipted inside this period.
-        const received = receiptsFor(d => d >= from && d <= to);
-        const receivedAfterPeriod = receiptsFor(d => d > to);
-
-        // Assigned — only what the ASN documents issued to workers inside this
-        // period, so each month's report shows that month's hand-outs.
-        const assignedFor = (match: (d: Date) => boolean) => (assignmentsByItem.get(item.id) ?? [])
-          .filter(a => match(a.date))
+        // Hand-outs from ASN forms issued inside this period. Used only to
+        // derive Opening — the Assigned *column* shows the row's live snapshot.
+        const assignedInPeriod = (assignmentsByItem.get(item.id) ?? [])
+          .filter(a => a.date >= from && a.date <= to)
           .reduce((s, a) => s + a.qty, 0);
 
-        const assigned = assignedFor(d => d >= from && d <= to);
-        const assignedAfterPeriod = assignedFor(d => d > to);
+        // Closing and Assigned come straight off the inventory row — the ground
+        // truth the backend keeps live (issueItems() moves availableQuantity into
+        // assignedQuantity; returns move it back). They cannot disagree with the
+        // Inventory page, because they ARE the Inventory page.
+        const closing = item.availableQuantity;
+        const assigned = item.assignedQuantity || 0;
 
-        // Closing anchors on `availableQuantity` — the ground truth the backend
-        // keeps live (decremented on assignment/usage, incremented on receipt and
-        // return) and the figure the Inventory page shows. For a past period,
-        // rewind movements made after it; for a period ending today the rewinds
-        // are all zero and Closing IS the Inventory page's available quantity.
-        const closing = Math.max(0,
-          item.availableQuantity + assignedAfterPeriod + issuedAfterPeriod - receivedAfterPeriod);
-
-        // Opening = Closing rewound over this period's own movements, so the
-        // ledger identity holds: opening + received - assigned - issued = closing,
-        // and last month's Closing is this month's Opening.
-        const opening = Math.max(0, closing + assigned + issuedInPeriod - received);
+        // Opening = Closing rewound over this period's own movements: add back
+        // what left the warehouse during the period (hand-outs per the dated ASN
+        // docs, consumption per the usage log) and remove what arrived (GRN
+        // receipts). Movements before or after the period cancel out of the
+        // rewind, so Opening stays a fixed historical figure.
+        const opening = Math.max(0, closing + assignedInPeriod + issuedInPeriod - received);
 
         return {
           itemId: item.id,
@@ -526,7 +532,7 @@ function StockMovementReport() {
       {/* Legend */}
       <div style={{ marginTop: 16, padding: '12px 16px', background: 'var(--bg-2)', borderRadius: 'var(--radius)', border: '1px solid var(--border)', fontSize: 12, color: 'var(--text-3)' }}>
         <strong style={{ color: 'var(--text-2)' }}>How it works:</strong>
-        {' '}Opening = stock at start of period · Received = stock receipted via GRN in this period · Assigned = stock issued to workers in this period · Issued/Used = stock consumed in this period · Closing = current available stock (matches Inventory page). Opening + Received − Assigned − Issued = Closing. Stock held by workers is out of the warehouse but not yet consumed, so it reduces Closing without counting as Issued.
+        {' '}Opening = stock at start of period · Received = stock receipted via GRN in this period · Assigned = stock currently out with workers (all-time, not period-scoped) · Issued/Used = stock consumed in this period · Closing = current available stock (matches Inventory page). Stock held by workers is out of the warehouse but not yet consumed, so it reduces Closing without counting as Issued.
       </div>
     </div>
   );

@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react';
 import * as XLSX from 'xlsx';
 import { BarChart2, Download, Search, Filter } from 'lucide-react';
 import { format, startOfMonth, endOfMonth, subMonths } from 'date-fns';
-import { useInventory, useItemUsage, useGrnList } from '../hooks/useApi';
+import { useInventory, useItemUsage, useGrnList, useAssignmentForms } from '../hooks/useApi';
 import MultiSelect from '../components/MultiSelect';
 import SerialNumbers from '../components/SerialNumbers';
 import AssignedUsedReport from './AssignedUsedReport';
@@ -31,6 +31,15 @@ interface GrnDocument {
   id: string; grnNo: string; schemeNo?: string; status: string;
   dateOfReceipt?: string; createdAt: string;
   items?: GrnLineItem[];
+}
+
+interface AssignmentFormLine {
+  itemCode?: string; qtyIssued?: number; itemId?: string;
+}
+
+interface AssignmentFormDocument {
+  id: string; assignmentNo: string; status: string;
+  items?: AssignmentFormLine[];
 }
 
 interface StockRow {
@@ -104,6 +113,7 @@ function StockMovementReport() {
   const { data: items = [] } = useInventory();
   const { data: usageData = [] } = useItemUsage();
   const { data: grnData = [] } = useGrnList();
+  const { data: assignmentFormsData = [] } = useAssignmentForms();
 
   const today = new Date().toISOString().split('T')[0];
   const [dateFrom, setDateFrom] = useState(format(startOfMonth(new Date()), 'yyyy-MM-dd'));
@@ -115,6 +125,7 @@ function StockMovementReport() {
   const list = items as InventoryItem[];
   const usage = usageData as UsageRecord[];
   const grns = grnData as GrnDocument[];
+  const assignmentForms = assignmentFormsData as AssignmentFormDocument[];
 
   const schemeOptions = useMemo(() => [...new Set(list.map(i => i.schemeNo).filter(Boolean))].sort() as string[], [list]);
   const categoryOptions = useMemo(() => [...new Set(list.map(i => i.category).filter(Boolean))].sort() as string[], [list]);
@@ -196,6 +207,55 @@ function StockMovementReport() {
     return receipts;
   }, [itemLookup, grns]);
 
+  /**
+   * How much stock each inventory row has been handed out on issued ASN forms,
+   * counted across all time.
+   *
+   * The row's own `assignedQuantity` cannot answer this. It is a *live* balance —
+   * issuing raises it, a return lowers it again — and forms issued before that
+   * bookkeeping landed never raised it at all, so it under-reports what actually
+   * went out. The ASN documents are the record of the hand-out itself, which no
+   * later movement rewrites.
+   *
+   * Lines carry an `itemId`, which `assertIssuable()` requires before a form can
+   * be issued, so a line normally names its row outright. Forms issued before
+   * that guard existed can lack one; those fall back to their SKU, and the SKU
+   * map is built *only* from such lines so a line is never counted on both paths.
+   */
+  const asnIssued = useMemo(() => {
+    const byItemId = new Map<string, number>();
+    const bySkuUnlinked = new Map<string, number>();
+    for (const form of assignmentForms) {
+      if (form.status !== 'issued') continue;
+      for (const line of form.items ?? []) {
+        const qty = line.qtyIssued ?? 0;
+        if (qty <= 0) continue;
+        if (line.itemId) {
+          byItemId.set(line.itemId, (byItemId.get(line.itemId) ?? 0) + qty);
+        } else if (line.itemCode?.trim()) {
+          const sku = matchKey(line.itemCode);
+          bySkuUnlinked.set(sku, (bySkuUnlinked.get(sku) ?? 0) + qty);
+        }
+      }
+    }
+    return { byItemId, bySkuUnlinked };
+  }, [assignmentForms]);
+
+  /**
+   * SKUs sitting on more than one inventory row. An unlinked ASN line names only
+   * a SKU, so there is no way to tell which of those rows it came out of —
+   * crediting it to each of them would report the same hand-out several times
+   * over. Those rows show only what their linked lines prove.
+   */
+  const ambiguousSkus = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const item of list) {
+      const sku = matchKey(item.sku);
+      counts.set(sku, (counts.get(sku) ?? 0) + 1);
+    }
+    return new Set([...counts].filter(([, n]) => n > 1).map(([sku]) => sku));
+  }, [list]);
+
   // Build stock report rows
   const reportRows = useMemo((): StockRow[] => {
     const from = dateFrom ? new Date(dateFrom + 'T00:00:00') : new Date('2000-01-01T00:00:00');
@@ -225,19 +285,32 @@ function StockMovementReport() {
           .filter(r => r.date >= from && r.date <= to)
           .reduce((s, r) => s + r.qty, 0);
 
-        // Closing and Assigned come straight off the inventory row — the ground
-        // truth the backend keeps live (issueItems() moves availableQuantity into
-        // assignedQuantity; returns move it back). They cannot disagree with the
-        // Inventory page, because they ARE the Inventory page.
+        // Closing comes straight off the inventory row — the ground truth the
+        // backend keeps live. It cannot disagree with the Inventory page,
+        // because it IS the Inventory page.
         const closing = item.availableQuantity;
-        const assigned = item.assignedQuantity || 0;
+
+        // Assigned reports every hand-out this row has been through, from the
+        // ASN documents. Note this is cumulative and the two counters below are
+        // not: an item handed out and returned still counts here, so a row does
+        // not balance as Opening + Received - Assigned - Issued = Closing.
+        const sku = matchKey(item.sku);
+        const assigned = asnIssued.byItemId.get(item.id)
+          ?? (ambiguousSkus.has(sku) ? undefined : asnIssued.bySkuUnlinked.get(sku))
+          ?? item.assignedQuantity
+          ?? 0;
 
         // Everything ever added to this row. The backend only moves stock
         // *between* these three counters — assigning trades available for
         // assigned, consuming trades assigned for used — so their sum is
         // conserved through every hand-out, return and usage, and changes only
         // when stock enters (GRN receipt, manual add) or is manually removed.
-        const everReceived = closing + assigned + (item.usedQuantity || 0);
+        //
+        // This needs what is *currently* out with workers, not the cumulative
+        // hand-out total above — stock that came back is already counted in
+        // `closing`, and adding it again here would invent receipts that never
+        // happened and inflate Opening by the returned quantity.
+        const everReceived = closing + (item.assignedQuantity || 0) + (item.usedQuantity || 0);
 
         // Opening = stock on hand before this period's receipts arrived. Being
         // built from the conserved sum, it does not drift when workers hand
@@ -259,7 +332,7 @@ function StockMovementReport() {
           closing,
         };
       });
-  }, [list, usage, receiptsByItem, dateFrom, dateTo, search, schemeFilters, categoryFilters]);
+  }, [list, usage, receiptsByItem, asnIssued, ambiguousSkus, dateFrom, dateTo, search, schemeFilters, categoryFilters]);
 
   // Totals
   const totals = useMemo(() => ({
@@ -487,7 +560,7 @@ function StockMovementReport() {
       {/* Legend */}
       <div style={{ marginTop: 16, padding: '12px 16px', background: 'var(--bg-2)', borderRadius: 'var(--radius)', border: '1px solid var(--border)', fontSize: 12, color: 'var(--text-3)' }}>
         <strong style={{ color: 'var(--text-2)' }}>How it works:</strong>
-        {' '}Opening = stock at start of period · Received = stock receipted via GRN in this period · Assigned = stock currently out with workers (all-time, not period-scoped) · Issued/Used = stock consumed in this period · Closing = current available stock (matches Inventory page). Stock held by workers is out of the warehouse but not yet consumed, so it reduces Closing without counting as Issued.
+        {' '}Opening = stock at start of period · Received = stock receipted via GRN in this period · Assigned = total handed out to workers on Assignment Forms, counted across all time · Issued/Used = stock consumed in this period · Closing = current available stock in the warehouse (matches Inventory page). Assigned counts every hand-out, including items since returned, so a row does not read across as Opening + Received − Assigned − Issued = Closing.
       </div>
     </div>
   );

@@ -19,7 +19,7 @@ interface StockItem {
 }
 
 // ── Item code autocomplete ─────────────────────────────────────────────────
-function ItemCodePicker({ row, source, filterStock, onPick, readOnly, usedIds, stockField }: {
+function ItemCodePicker({ row, source, filterStock, onPick, readOnly, usedIds, stockField, resolveStock }: {
   row: LineRow;
   source: 'products' | 'inventory';
   filterStock?: (item: StockItem) => boolean;
@@ -27,7 +27,11 @@ function ItemCodePicker({ row, source, filterStock, onPick, readOnly, usedIds, s
   readOnly?: boolean;
   usedIds: string[];
   stockField?: string;
+  resolveStock?: (item: StockItem) => number;
 }) {
+  // A form can supply its own on-hand figure (the document-derived one, say);
+  // otherwise the row's own balance stands.
+  const stockOf = (item: StockItem) => resolveStock?.(item) ?? item.availableQuantity;
   const [query, setQuery] = useState(row.itemCode);
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -45,7 +49,7 @@ function ItemCodePicker({ row, source, filterStock, onPick, readOnly, usedIds, s
 
   const q = query.trim().toLowerCase();
   const stockOptions = (stock as StockItem[])
-    .filter(i => i.isActive && (i.availableQuantity > 0 || i.id === selectedId))
+    .filter(i => i.isActive && (stockOf(i) > 0 || i.id === selectedId))
     .filter(i => !filterStock || filterStock(i))
     .filter(i => !usedIds.includes(i.id) || i.id === selectedId)
     .filter(i => !q || i.sku.toLowerCase().includes(q) || i.name.toLowerCase().includes(q))
@@ -74,7 +78,7 @@ function ItemCodePicker({ row, source, filterStock, onPick, readOnly, usedIds, s
       itemDescription: i.name,
       unit: i.product?.unit || '',
       serialNumber: i.serialNumber || '',
-      ...(stockField ? { [stockField]: i.availableQuantity } : {}),
+      ...(stockField ? { [stockField]: stockOf(i) } : {}),
     });
   };
 
@@ -151,7 +155,7 @@ function ItemCodePicker({ row, source, filterStock, onPick, readOnly, usedIds, s
                   <div style={optionTitle}>{i.name}</div>
                   <div style={optionMeta}>
                     <span>SKU: <code style={{ color: 'var(--accent)' }}>{i.sku}</code></span>
-                    <span>Available: <strong style={{ color: 'var(--green)' }}>{i.availableQuantity}</strong></span>
+                    <span>Available: <strong style={{ color: 'var(--green)' }}>{stockOf(i)}</strong></span>
                     {i.serialNumber && <span>SN: {i.serialNumber}</span>}
                   </div>
                 </div>
@@ -182,7 +186,7 @@ const optionMeta: React.CSSProperties = {
 export default function LineItemsTable({
   rows, onChange, columns, source, filterStock,
   minRows = 15, readOnly = false, totalKey, totalLabel,
-  newRowDefaults = {}, stockField,
+  newRowDefaults = {}, stockField, resolveStock,
 }: {
   rows: LineRow[];
   onChange: (rows: LineRow[]) => void;
@@ -196,6 +200,8 @@ export default function LineItemsTable({
   newRowDefaults?: Record<string, any>;
   /** Row key the picked item's on-hand quantity is written to, if the form shows one. */
   stockField?: string;
+  /** Overrides where a picked item's on-hand quantity is read from. Defaults to the inventory row. */
+  resolveStock?: (item: StockItem) => number;
 }) {
   const usedIds = rows.map(r => r.productId || r.itemId).filter(Boolean) as string[];
 
@@ -245,6 +251,7 @@ export default function LineItemsTable({
                       readOnly={readOnly}
                       usedIds={usedIds}
                       stockField={stockField}
+                      resolveStock={resolveStock}
                       onPick={patch => patchRow(index, patch)}
                     />
                   ) : (
@@ -433,21 +440,31 @@ function Cell({ row, column, readOnly, onChange }: {
 
   if (column.type === 'number') {
     const max = column.max?.(row);
+    // A line saved before stock moved can arrive already over the limit, so the
+    // warning is driven by the row rather than by what was just typed.
+    const warning = column.warn?.(row);
     return (
-      <input
-        type="number"
-        className="doc-input"
-        style={{ textAlign: 'center' }}
-        min={0}
-        max={max}
-        placeholder="0"
-        value={value === 0 || value == null ? '' : value}
-        onChange={e => {
-          const parsed = e.target.value === '' ? 0 : Number(e.target.value);
-          if (Number.isNaN(parsed) || parsed < 0) return;
-          onChange(max != null ? Math.min(parsed, max) : parsed);
-        }}
-      />
+      <>
+        <input
+          type="number"
+          className="doc-input"
+          style={{ textAlign: 'center' }}
+          min={0}
+          max={max}
+          placeholder="0"
+          value={value === 0 || value == null ? '' : value}
+          onChange={e => {
+            const parsed = e.target.value === '' ? 0 : Number(e.target.value);
+            if (Number.isNaN(parsed) || parsed < 0) return;
+            onChange(max != null ? Math.min(parsed, max) : parsed);
+          }}
+        />
+        {warning && (
+          <div style={{ fontSize: 11, color: 'var(--red)', marginTop: 2, lineHeight: 1.3 }}>
+            {warning}
+          </div>
+        )}
+      </>
     );
   }
 

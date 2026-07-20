@@ -14,6 +14,7 @@ import {
   stripEmptyRows, toLineRows, type LineColumn, type LineRow,
 } from '../../components/documents/lineRows';
 import { fullName, orUndefined, toDateInput, today } from '../../components/documents/formUtils';
+import { useDocumentStock } from '../../hooks/useDocumentStock';
 import type { AssignmentForm, User } from '../../types';
 
 const MIN_ROWS = 15;
@@ -25,7 +26,10 @@ const COLUMNS: LineColumn[] = [
   { key: 'itemCode', label: 'Item Code', width: '11%' },
   { key: 'itemDescription', label: 'Item Description', width: '24%' },
   { key: 'unit', label: 'Unit', width: '7%' },
-  { key: 'stockAvailable', label: 'Stock Available', type: 'readonly', width: '9%' },
+  {
+    key: 'stockAvailable', label: 'Stock Available', type: 'readonly', width: '9%',
+    hint: 'Based on GRN receipts minus ASN assignments',
+  },
   { key: 'qtyRequested', label: 'Qty Requested', type: 'number', width: '9%' },
   { key: 'qtyApproved', label: 'Qty Approved', type: 'number', width: '9%' },
   {
@@ -34,7 +38,25 @@ const COLUMNS: LineColumn[] = [
     type: 'number',
     width: '9%',
     // Cannot issue more than the storekeeper approved, nor more than exists.
-    max: row => Math.min(row.qtyApproved || 0, row.stockAvailable || 0) || undefined,
+    //
+    // Stock binds even at zero. The earlier `|| undefined` collapsed a zero cap
+    // to "no cap", which is exactly the case this column now has to hold: a SKU
+    // whose GRN receipts are fully accounted for by ASN forms reads zero.
+    // A free-text code has no stock figure behind it and stays uncapped, or the
+    // row could never be filled in.
+    max: row => {
+      const approved = Number(row.qtyApproved) || 0;
+      const stockCap = row.itemId ? Number(row.stockAvailable) || 0 : undefined;
+      if (approved > 0) return stockCap == null ? approved : Math.min(approved, stockCap);
+      return stockCap;
+    },
+    warn: row => {
+      if (!row.itemId) return undefined;
+      const available = Number(row.stockAvailable) || 0;
+      return (Number(row.qtyIssued) || 0) > available
+        ? `Exceeds available stock (${available})`
+        : undefined;
+    },
   },
   {
     key: 'serialNumber', label: 'Serial Number(s)', type: 'serial', qtyKey: 'qtyIssued',
@@ -185,6 +207,7 @@ function AssignmentEditor({ id, doc, onClose, onCreated }: {
   onCreated: (id: string) => void;
 }) {
   const { data: users = [] } = useUsers();
+  const { resolveStock } = useDocumentStock();
   const createForm = useCreateAssignmentForm();
   const updateForm = useUpdateAssignmentForm();
 
@@ -331,6 +354,7 @@ function AssignmentEditor({ id, doc, onClose, onCreated }: {
           columns={COLUMNS}
           source="inventory"
           stockField="stockAvailable"
+          resolveStock={resolveStock}
           minRows={MIN_ROWS}
           newRowDefaults={ROW_DEFAULTS}
           totalKey="qtyIssued"

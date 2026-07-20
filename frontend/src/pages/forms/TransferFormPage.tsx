@@ -15,6 +15,7 @@ import {
   stripEmptyRows, toLineRows, type LineColumn, type LineRow,
 } from '../../components/documents/lineRows';
 import { fullName, orUndefined, toDateInput, today, uniqueSorted } from '../../components/documents/formUtils';
+import { useDocumentStock } from '../../hooks/useDocumentStock';
 import type { TransferForm, User } from '../../types';
 
 const MIN_ROWS = 15;
@@ -24,8 +25,23 @@ const COLUMNS: LineColumn[] = [
   { key: 'itemCode', label: 'Item Code', width: '13%' },
   { key: 'itemDescription', label: 'Item Description', width: '28%' },
   { key: 'unit', label: 'Unit', width: '8%' },
-  { key: 'stockQty', label: 'Stock Qty (From)', type: 'readonly', width: '11%' },
-  { key: 'qtyToTransfer', label: 'Qty to Transfer', type: 'number', width: '11%', max: row => row.stockQty || undefined },
+  {
+    key: 'stockQty', label: 'Stock Qty (From)', type: 'readonly', width: '11%',
+    hint: 'Based on GRN receipts minus ASN assignments',
+  },
+  {
+    key: 'qtyToTransfer', label: 'Qty to Transfer', type: 'number', width: '11%',
+    // Binds at zero for a picked line, the same way the assignment form's Qty
+    // Issued does; free-text codes carry no stock figure and stay uncapped.
+    max: row => (row.itemId ? Number(row.stockQty) || 0 : undefined),
+    warn: row => {
+      if (!row.itemId) return undefined;
+      const available = Number(row.stockQty) || 0;
+      return (Number(row.qtyToTransfer) || 0) > available
+        ? `Exceeds available stock (${available})`
+        : undefined;
+    },
+  },
   {
     key: 'serialNumber', label: 'Serial Number(s)', type: 'serial', qtyKey: 'qtyToTransfer',
     width: '17%', hint: 'Serial Number(s) — enter one for the line, or one per unit transferred',
@@ -183,6 +199,7 @@ function TransferEditor({ id, doc, onClose, onCreated }: {
 }) {
   const { data: users = [] } = useUsers();
   const { data: inventory = [] } = useInventory();
+  const { resolveStock } = useDocumentStock();
   const createForm = useCreateTransferForm();
   const updateForm = useUpdateTransferForm();
 
@@ -331,6 +348,7 @@ function TransferEditor({ id, doc, onClose, onCreated }: {
           source="inventory"
           filterStock={filterStock}
           stockField="stockQty"
+          resolveStock={resolveStock}
           minRows={MIN_ROWS}
           newRowDefaults={ROW_DEFAULTS}
           totalKey="qtyToTransfer"

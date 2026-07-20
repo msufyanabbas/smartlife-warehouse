@@ -21,6 +21,8 @@ export interface LineColumn {
   width?: string;
   /** Upper bound for number cells, e.g. cannot transfer more than stock. */
   max?: (row: LineRow) => number | undefined;
+  /** Warning shown under a number cell, e.g. a saved line that now exceeds stock. */
+  warn?: (row: LineRow) => string | undefined;
   /** For `serial` cells: the row key holding the unit count the serials cover. */
   qtyKey?: string;
   /** Tooltip on the column header. */

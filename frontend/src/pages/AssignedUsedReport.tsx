@@ -2,10 +2,25 @@ import { useMemo, useState } from 'react';
 import * as XLSX from 'xlsx';
 import { ClipboardList, Download, Filter, Search } from 'lucide-react';
 import { format } from 'date-fns';
-import { useAssignedUsedReport } from '../hooks/useApi';
+import { useAssignedUsedReport, useAssignmentForms } from '../hooks/useApi';
 import SerialNumbers from '../components/SerialNumbers';
 import { uniqueSorted } from '../components/documents/formUtils';
 import type { AssignedUsedReportRow } from '../types';
+
+interface AsnLine {
+  itemCode?: string; itemDescription?: string; serialNumber?: string;
+  qtyIssued?: number; itemId?: string;
+}
+
+interface AsnForm {
+  id: string; assignmentNo: string; status: string;
+  date?: string; createdAt: string; projectSite?: string;
+  assignedTo?: { firstName?: string; lastName?: string } | null;
+  items?: AsnLine[];
+}
+
+/** Rows recovered from an assignment form carry the form's number so they can be chased up. */
+type ReportRow = AssignedUsedReportRow & { unlinkedFormNo?: string };
 
 const STATUS_STYLE: Record<AssignedUsedReportRow['status'], string> = {
   assigned: 'badge-blue',
@@ -15,7 +30,63 @@ const STATUS_STYLE: Record<AssignedUsedReportRow['status'], string> = {
 
 export default function AssignedUsedReport() {
   const { data = [], isLoading } = useAssignedUsedReport();
-  const allRows = data as AssignedUsedReportRow[];
+  const { data: formsData = [] } = useAssignmentForms();
+
+  /**
+   * This report is built from the assignments table, which `issueItems()` fills
+   * as a form is issued. That step skips any line carrying no `itemId` and runs
+   * outside a transaction, so a form saved as `issued` can open no assignment at
+   * all — and stock booked out that way is invisible here, however plainly the
+   * document itself records it. (`assertIssuable` now blocks issuing such a form,
+   * but forms issued before that guard are already in this state.)
+   *
+   * Those forms are read straight off the document and appended. They are marked
+   * in the table, because only the hand-out is recoverable this way: consumption
+   * and returns are keyed to the assignment that was never opened, so the Used
+   * and Returned columns cannot be reconstructed and read as zero.
+   */
+  const allRows = useMemo((): ReportRow[] => {
+    const rows = data as ReportRow[];
+    const forms = formsData as AsnForm[];
+
+    const linkedFormIds = new Set(rows.map(r => r.assignmentFormId).filter(Boolean));
+    const recovered: ReportRow[] = [];
+
+    for (const form of forms) {
+      if (form.status !== 'issued' || linkedFormIds.has(form.id)) continue;
+      for (const [index, line] of (form.items ?? []).entries()) {
+        const qty = line.qtyIssued ?? 0;
+        if (qty <= 0) continue;
+        recovered.push({
+          id: `asn:${form.id}:${index}`,
+          assignmentFormId: form.id,
+          unlinkedFormNo: form.assignmentNo,
+          itemId: line.itemId ?? '',
+          itemName: line.itemDescription || line.itemCode || '',
+          sku: line.itemCode || '',
+          serialNumber: line.serialNumber || '',
+          // Neither is carried on the document — they live on the inventory row.
+          category: '',
+          schemeNo: '',
+          assignedToId: '',
+          assignedToName: form.assignedTo
+            ? `${form.assignedTo.firstName ?? ''} ${form.assignedTo.lastName ?? ''}`.trim()
+            : '',
+          qtyAssigned: qty,
+          qtyUsed: 0,
+          taskNos: [],
+          projectSite: form.projectSite || '',
+          assignmentDate: form.date || form.createdAt,
+          returnedAt: null,
+          status: 'assigned',
+        });
+      }
+    }
+
+    return recovered.length ? [...rows, ...recovered] : rows;
+  }, [data, formsData]);
+
+  const unlinkedCount = useMemo(() => allRows.filter(r => r.unlinkedFormNo).length, [allRows]);
 
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
@@ -88,6 +159,11 @@ export default function AssignedUsedReport() {
       <div className="flex items-center justify-between" style={{ marginBottom: 16 }}>
         <p className="text-muted text-sm">
           {rows.length} record{rows.length === 1 ? '' : 's'} · {totals.assigned} assigned · {totals.used} used
+          {unlinkedCount > 0 && (
+            <> · <span style={{ color: 'var(--yellow)' }}>
+              {unlinkedCount} recovered from assignment forms with no assignment record
+            </span></>
+          )}
         </p>
         <button className="btn btn-ghost" onClick={exportExcel} disabled={rows.length === 0}>
           <Download size={14} /> Export Excel
@@ -191,6 +267,15 @@ export default function AssignedUsedReport() {
                   </td>
                   <td>
                     <span className={`badge ${STATUS_STYLE[row.status]}`}>{row.status}</span>
+                    {row.unlinkedFormNo && (
+                      <span
+                        className="badge badge-yellow"
+                        style={{ marginLeft: 6 }}
+                        title={`Recovered from ${row.unlinkedFormNo}. This form issued stock without opening an assignment record, so used and returned quantities are not available for it.`}
+                      >
+                        {row.unlinkedFormNo}
+                      </span>
+                    )}
                   </td>
                 </tr>
               ))}

@@ -220,6 +220,7 @@ export interface TransferFormLineItem {
 
 export interface AssignedUsedReportRow {
   id: string;
+  assignmentFormId?: string | null;
   itemId: string;
   itemName: string;
   sku: string;

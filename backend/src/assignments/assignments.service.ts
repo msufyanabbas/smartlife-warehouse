@@ -169,6 +169,10 @@ export class AssignmentsService {
 
       return {
         id: a.id,
+        // Lets the report tell which assignment forms actually opened an
+        // assignment, so one that issued without opening any can be spotted
+        // rather than silently missing.
+        assignmentFormId: a.assignmentFormId ?? null,
         itemId: a.itemId,
         itemName: a.item?.name ?? '',
         sku: a.item?.sku ?? '',

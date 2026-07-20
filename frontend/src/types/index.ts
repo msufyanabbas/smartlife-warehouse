@@ -218,26 +218,6 @@ export interface TransferFormLineItem {
   itemId?: string;
 }
 
-export interface AssignedUsedReportRow {
-  id: string;
-  assignmentFormId?: string | null;
-  itemId: string;
-  itemName: string;
-  sku: string;
-  serialNumber: string;
-  category: string;
-  schemeNo: string;
-  assignedToId: string;
-  assignedToName: string;
-  qtyAssigned: number;
-  qtyUsed: number;
-  taskNos: string[];
-  projectSite: string;
-  assignmentDate: string;
-  returnedAt: string | null;
-  status: 'assigned' | 'used' | 'returned';
-}
-
 export type ItemRequestStatus = 'pending' | 'approved' | 'rejected' | 'cancelled';
 
 export interface ItemRequest {

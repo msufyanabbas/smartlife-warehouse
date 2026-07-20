@@ -105,12 +105,12 @@ export default function StockReportPage() {
     <div className="page">
       <div className="page-header">
         <h1>Reports</h1>
-        <p>Stock movement and assigned / used item history</p>
+        <p>Stock movement and items issued on assignment forms</p>
       </div>
 
       <div className="flex gap-2" style={{ marginBottom: 20 }}>
         {tabButton('movement', 'Stock Movement')}
-        {tabButton('assigned-used', 'Assigned & Used Items')}
+        {tabButton('assigned-used', 'Issued Items (ASN)')}
       </div>
 
       {tab === 'movement' ? <StockMovementReport /> : <AssignedUsedReport />}

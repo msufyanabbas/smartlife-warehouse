@@ -477,13 +477,6 @@ export const useDeleteProduct = () => {
   });
 };
 
-// ── Assigned / Used Report ─────────────────────────────────────────────────
-export const useAssignedUsedReport = () =>
-  useQuery({
-    queryKey: ['assigned-used-report'],
-    queryFn: () => api.get('/assignments/report').then(r => r.data.data),
-  });
-
 // ── Document forms (GRN / Assignment / Transfer) ───────────────────────────
 // All three modules expose the same REST shape; the shared bodies below keep
 // the hooks themselves thin while staying lint-legal call sites.

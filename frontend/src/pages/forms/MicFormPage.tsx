@@ -29,6 +29,10 @@ const ITEM_STATUSES = ['Installed', 'Partial', 'Pending', 'Damaged', 'Delivered'
 const ROW_DEFAULTS = {
   qtyReceived: 0, qtyInstalled: 0, serialNumbers: '',
   installDate: today(), status: 'Pending',
+  // Which ASN this particular line was taken from. Stamped when the item is
+  // picked, because it cannot be recovered afterwards: the same SKU may have
+  // been issued on any number of forms, and the row only remembers the item.
+  sourceAsnNo: '',
 };
 
 const COLUMNS: LineColumn[] = [
@@ -310,10 +314,38 @@ function MicEditor({ id, doc, onClose, onCreated }: {
   // A manager may raise the form for any issued stock; a worker only for their own.
   const issued = issuedItems(forms, isManager ? undefined : user?.id);
 
-  // The ASN link falls out of the items that were picked. Until something is
-  // picked, a saved document keeps showing whatever it was filed against.
+  /**
+   * Stamps each line with the assignment it was actually taken from.
+   *
+   * Reading the link back off the item id instead would name *every* form that
+   * ever issued that SKU — pick one Current Transformer and the document claims
+   * all five assignments that shipped one. The choice only exists at the moment
+   * of picking, so it is recorded there and carried on the row.
+   *
+   * Rows are matched by `_key` rather than index: removing a row shifts every
+   * row below it, and an index comparison would read those as newly picked.
+   */
+  const handleRowsChange = (next: LineRow[]) => {
+    setRows(previous => {
+      const byKey = new Map(previous.map(row => [row._key, row]));
+      return next.map(row => {
+        const before = byKey.get(row._key);
+        if (before && row.itemId === before.itemId) return row;
+        return {
+          ...row,
+          sourceAsnNo: row.itemId ? issued.get(row.itemId)?.asnNos[0] ?? '' : '',
+        };
+      });
+    });
+  };
+
+  // Built from what those lines recorded, so it names only the assignments this
+  // document actually draws on. A saved document with nothing picked yet keeps
+  // showing whatever it was filed against.
   const derivedAsnNo = uniqueSorted(
-    rows.flatMap(row => (row.itemId ? issued.get(row.itemId)?.asnNos ?? [] : [])),
+    rows
+      .filter(row => row.itemCode?.trim())
+      .map(row => row.sourceAsnNo as string | undefined),
   ).join(', ');
   const linkedAsnNo = derivedAsnNo || doc?.linkedAsnNo || '';
 
@@ -496,7 +528,7 @@ function MicEditor({ id, doc, onClose, onCreated }: {
 
         <LineItemsTable
           rows={rows}
-          onChange={setRows}
+          onChange={handleRowsChange}
           columns={COLUMNS}
           source="inventory"
           minRows={MIN_ROWS}

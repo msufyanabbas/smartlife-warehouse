@@ -83,6 +83,13 @@ export const useUsers = () =>
     queryFn: () => api.get('/users').then(r => r.data.data),
   });
 
+/** Admins and managers, names only — the one user feed a worker may read. */
+export const useApprovers = () =>
+  useQuery({
+    queryKey: ['approvers'],
+    queryFn: () => api.get('/users/approvers').then(r => r.data.data),
+  });
+
 export const useWorkers = () =>
   useQuery({
     queryKey: ['workers'],
@@ -477,9 +484,9 @@ export const useDeleteProduct = () => {
   });
 };
 
-// ── Document forms (GRN / Assignment / Transfer) ───────────────────────────
-// All three modules expose the same REST shape; the shared bodies below keep
-// the hooks themselves thin while staying lint-legal call sites.
+// ── Document forms (GRN / Assignment / Transfer / MIC) ─────────────────────
+// Every one of these modules exposes the same REST shape; the shared bodies
+// below keep the hooks themselves thin while staying lint-legal call sites.
 const listDocuments = (resource: string) => api.get(`/${resource}`).then(r => r.data.data);
 const getDocument = (resource: string, id?: string) => api.get(`/${resource}/${id}`).then(r => r.data.data);
 
@@ -496,6 +503,9 @@ const onDocumentSaved = (qc: ReturnType<typeof useQueryClient>, resource: string
   // Issuing an assignment form opens assignment records. `assignments-history` is
   // a separate key, not a child of `assignments`, so it has to be named — the
   // stock report reads it, and without this its Assigned column stays stale.
+  // The pending feed is a separate key, not a child of ['mic'], so a save that
+  // submits or withdraws a form has to name it or the manager's alert goes stale.
+  if (resource === 'mic') qc.invalidateQueries({ queryKey: ['mic-pending'] });
   if (resource === 'assignment-forms') {
     qc.invalidateQueries({ queryKey: ['assignments'] });
     qc.invalidateQueries({ queryKey: ['assignments-history'] });
@@ -592,5 +602,54 @@ export const useUpdateTransferForm = () => {
       api.put(`/transfer-forms/${id}`, data).then(r => r.data.data),
     onSuccess: () => onDocumentSaved(qc, 'transfer-forms'),
     onError: documentError('Failed to save transfer form'),
+  });
+};
+
+// Material installation confirmations (MIC)
+export const useMicList = () =>
+  useQuery({ queryKey: ['mic'], queryFn: () => listDocuments('mic') });
+
+export const useMic = (id?: string) =>
+  useQuery({ queryKey: ['mic', id], queryFn: () => getDocument('mic', id), enabled: !!id });
+
+export const useCreateMic = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: any) => api.post('/mic', data).then(r => r.data.data),
+    onSuccess: () => onDocumentSaved(qc, 'mic'),
+    onError: documentError('Failed to create MIC'),
+  });
+};
+
+export const useUpdateMic = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: any }) =>
+      api.put(`/mic/${id}`, data).then(r => r.data.data),
+    onSuccess: () => onDocumentSaved(qc, 'mic'),
+    onError: documentError('Failed to save MIC'),
+  });
+};
+
+/** Drives the approval alerts, so it polls the way the other pending feeds do. */
+export const usePendingMic = (enabled = true) =>
+  useQuery({
+    queryKey: ['mic-pending'],
+    queryFn: () => api.get('/mic/pending').then(r => r.data.data),
+    refetchInterval: 30000,
+    enabled,
+  });
+
+export const useReviewMic = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, action, rejectionReason }: {
+      id: string; action: 'approve' | 'reject'; rejectionReason?: string;
+    }) => api.patch(`/mic/${id}/review`, { action, rejectionReason }).then(r => r.data.data),
+    onSuccess: (_, vars) => {
+      onDocumentSaved(qc, 'mic');
+      toast.success(vars.action === 'approve' ? 'MIC approved ✓' : 'MIC rejected');
+    },
+    onError: documentError('Failed to review MIC'),
   });
 };

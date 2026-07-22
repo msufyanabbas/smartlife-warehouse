@@ -468,6 +468,31 @@ function Cell({ row, column, readOnly, onChange }: {
     );
   }
 
+  if (column.type === 'date') {
+    return (
+      <input
+        type="date"
+        className="doc-input"
+        value={value ?? ''}
+        onChange={e => onChange(e.target.value)}
+      />
+    );
+  }
+
+  if (column.type === 'select') {
+    return (
+      <select
+        className="doc-input"
+        value={value ?? ''}
+        onChange={e => onChange(e.target.value)}
+      >
+        {(column.options ?? []).map(option => (
+          <option key={option} value={option}>{option}</option>
+        ))}
+      </select>
+    );
+  }
+
   return (
     <input
       className="doc-input"

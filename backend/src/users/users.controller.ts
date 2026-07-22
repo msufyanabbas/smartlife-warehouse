@@ -34,6 +34,13 @@ export class UsersController {
     return this.usersService.findWorkers();
   }
 
+  // Open to every signed-in user, and declared before `:id`. Document forms let
+  // a worker pick who verifies their paperwork, which needs a list of managers.
+  @Get('approvers')
+  findApprovers() {
+    return this.usersService.findApprovers();
+  }
+
   @Get(':id')
   @Roles(Role.ADMIN, Role.MANAGER)
   findOne(@Param('id') id: string) {

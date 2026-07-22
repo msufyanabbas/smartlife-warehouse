@@ -3,12 +3,12 @@ import {
   LayoutDashboard, Package, Users, ClipboardList,
   ArrowLeftRight, LogOut, Activity, RotateCcw, ShoppingCart,
   Tag, FolderOpen,
-  BarChart, FileText,
+  BarChart, FileText, ClipboardCheck,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import ThemeToggle from './ThemeToggle';
 import {
-  usePendingTransfers, usePendingReturnRequests, usePendingItemRequests,
+  usePendingTransfers, usePendingReturnRequests, usePendingItemRequests, usePendingMic,
 } from '../hooks/useApi';
 
 export default function Sidebar() {
@@ -21,10 +21,12 @@ export default function Sidebar() {
   const { data: pendingTransfers } = usePendingTransfers(isManager);
   const { data: pendingReturns } = usePendingReturnRequests(isManager);
   const { data: pendingItems } = usePendingItemRequests(isManager);
+  const { data: pendingMic } = usePendingMic(isManager);
 
   const pendingTransferCount = Array.isArray(pendingTransfers) ? pendingTransfers.length : 0;
   const pendingReturnCount = Array.isArray(pendingReturns) ? pendingReturns.length : 0;
   const pendingItemCount = Array.isArray(pendingItems) ? pendingItems.length : 0;
+  const pendingMicCount = Array.isArray(pendingMic) ? pendingMic.length : 0;
 
   const handleLogout = () => { logout(); navigate('/login'); };
 
@@ -127,6 +129,19 @@ export default function Sidebar() {
           <Activity size={16} /> Usage Log
         </NavLink>
 
+        {/* Workers raise their own installation confirmations, so this one document
+            is reachable without the rest of the manager-only Documents section. */}
+        {!isManager && (
+          <>
+            <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-3)', padding: '16px 16px 8px', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+              Documents
+            </div>
+            <NavLink to="/forms/mic" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+              <ClipboardCheck size={16} /> Material Installation
+            </NavLink>
+          </>
+        )}
+
         {isManager && (
           <>
             <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-3)', padding: '16px 16px 8px', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
@@ -140,6 +155,10 @@ export default function Sidebar() {
             </NavLink>
             <NavLink to="/forms/transfers" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
               <ArrowLeftRight size={16} /> Transfer Forms
+            </NavLink>
+            <NavLink to="/forms/mic" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+              <ClipboardCheck size={16} /> Material Installation
+              {pendingMicCount > 0 && <span className="badge-count">{pendingMicCount}</span>}
             </NavLink>
 
             <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-3)', padding: '16px 16px 8px', textTransform: 'uppercase', letterSpacing: '0.08em' }}>

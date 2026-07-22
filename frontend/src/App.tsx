@@ -18,6 +18,7 @@ import ProductsPage from './pages/ProductsPage';
 import GrnFormPage from './pages/forms/GrnFormPage';
 import AssignmentFormPage from './pages/forms/AssignmentFormPage';
 import TransferFormPage from './pages/forms/TransferFormPage';
+import MicFormPage from './pages/forms/MicFormPage';
 import './styles/global.css';
 import StockReportPage from './pages/StockReportPage';
 
@@ -45,6 +46,8 @@ export default function App() {
                 <Route path="/forms/grn" element={<RequireRole roles={['admin', 'manager']}><GrnFormPage /></RequireRole>} />
                 <Route path="/forms/assignments" element={<RequireRole roles={['admin', 'manager']}><AssignmentFormPage /></RequireRole>} />
                 <Route path="/forms/transfers" element={<RequireRole roles={['admin', 'manager']}><TransferFormPage /></RequireRole>} />
+                {/* Open to workers: the person who did the install fills this one in. */}
+                <Route path="/forms/mic" element={<MicFormPage />} />
               <Route path="/categories" element={<RequireRole roles={['admin', 'manager']}><CategoriesPage /></RequireRole>} />
               <Route path="/products" element={<RequireRole roles={['admin', 'manager']}><ProductsPage /></RequireRole>} />
                 <Route path="/users" element={

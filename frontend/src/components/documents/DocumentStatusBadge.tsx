@@ -1,10 +1,13 @@
-export type DocumentStatus = 'draft' | 'completed' | 'approved' | 'issued';
+export type DocumentStatus =
+  | 'draft' | 'completed' | 'approved' | 'issued' | 'pending_approval' | 'rejected';
 
 const STYLES: Record<DocumentStatus, { label: string; color: string; bg: string }> = {
   draft: { label: 'Draft', color: '#64748b', bg: 'rgba(100,116,139,0.14)' },
   completed: { label: 'Completed', color: '#16a34a', bg: 'rgba(22,163,74,0.14)' },
   approved: { label: 'Approved', color: '#2563eb', bg: 'rgba(37,99,235,0.14)' },
   issued: { label: 'Issued', color: '#9333ea', bg: 'rgba(147,51,234,0.14)' },
+  pending_approval: { label: 'Pending Approval', color: '#d97706', bg: 'rgba(217,119,6,0.14)' },
+  rejected: { label: 'Rejected', color: '#dc2626', bg: 'rgba(220,38,38,0.14)' },
 };
 
 export default function DocumentStatusBadge({ status }: { status?: string }) {

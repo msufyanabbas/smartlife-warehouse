@@ -1,5 +1,6 @@
-export default function DocumentHeader({ title, refLabel, refNumber }: {
+export default function DocumentHeader({ title, subtitle, refLabel, refNumber }: {
   title: string;
+  subtitle?: string;
   refLabel: string;
   refNumber?: string;
 }) {
@@ -18,7 +19,10 @@ export default function DocumentHeader({ title, refLabel, refNumber }: {
           <div className="doc-ref-value">{refNumber || 'Auto-generated'}</div>
         </div>
       </div>
-      <h2 className="doc-title">{title}</h2>
+      <h2 className="doc-title">
+        {title}
+        {subtitle && <span className="doc-subtitle">{subtitle}</span>}
+      </h2>
     </>
   );
 }

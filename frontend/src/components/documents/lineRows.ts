@@ -15,10 +15,13 @@ export interface LineColumn {
   label: string;
   /**
    * `readonly` cells are auto-filled from the catalog and not editable;
-   * `serial` cells take one serial per unit once the line's quantity exceeds 1.
+   * `serial` cells take one serial per unit once the line's quantity exceeds 1;
+   * `select` cells need `options`.
    */
-  type?: 'text' | 'number' | 'readonly' | 'serial';
+  type?: 'text' | 'number' | 'readonly' | 'serial' | 'date' | 'select';
   width?: string;
+  /** Choices for a `select` cell. */
+  options?: string[];
   /** Upper bound for number cells, e.g. cannot transfer more than stock. */
   max?: (row: LineRow) => number | undefined;
   /** Warning shown under a number cell, e.g. a saved line that now exceeds stock. */

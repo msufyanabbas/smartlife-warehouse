@@ -218,6 +218,44 @@ export interface TransferFormLineItem {
   itemId?: string;
 }
 
+export type MicItemStatus = 'Installed' | 'Partial' | 'Pending' | 'Damaged';
+export type MicStatus = 'draft' | 'pending_approval' | 'approved' | 'rejected';
+
+export interface MicDocument {
+  id: string;
+  micNo: string;
+  assignmentNo?: string;
+  date?: string;
+  siteId?: string;
+  projectClient?: string;
+  installDepartment?: string;
+  verifiedBy?: User;
+  verifiedById?: string;
+  purposeDescription?: string;
+  installedBy?: User;
+  installedById?: string;
+  status: MicStatus;
+  approvedBy?: User;
+  approvedById?: string;
+  approvedAt?: string;
+  rejectionReason?: string;
+  items: MicLineItem[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MicLineItem {
+  itemCode: string;
+  itemDescription: string;
+  unit: string;
+  qtyReceived: number;
+  qtyInstalled: number;
+  serialNumbers: string;
+  installDate: string;
+  status: MicItemStatus;
+  itemId?: string;
+}
+
 export type ItemRequestStatus = 'pending' | 'approved' | 'rejected' | 'cancelled';
 
 export interface ItemRequest {

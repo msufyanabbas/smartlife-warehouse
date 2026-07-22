@@ -17,6 +17,7 @@ import { ProductsModule } from './products/products.module';
 import { GrnModule } from './grn/grn.module';
 import { AssignmentFormsModule } from './assignment-forms/assignment-forms.module';
 import { TransferFormsModule } from './transfer-forms/transfer-forms.module';
+import { MicModule } from './mic/mic.module';
 
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
@@ -44,6 +45,7 @@ import { TransformInterceptor } from './common/interceptors/transform.intercepto
     GrnModule,
     AssignmentFormsModule,
     TransferFormsModule,
+    MicModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: JwtAuthGuard },

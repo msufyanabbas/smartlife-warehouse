@@ -1,8 +1,12 @@
-import { Package, Users, ClipboardList, ArrowLeftRight, AlertCircle, TrendingUp } from 'lucide-react';
-import { useInventoryStats, useAssignments, usePendingTransfers, useInventory, useUsers } from '../hooks/useApi';
+import {
+  Package, Users, ClipboardList, ArrowLeftRight, AlertCircle, TrendingUp, ClipboardCheck,
+} from 'lucide-react';
+import {
+  useInventoryStats, useAssignments, usePendingTransfers, useInventory, useUsers, usePendingMic,
+} from '../hooks/useApi';
 import { useAuth } from '../contexts/AuthContext';
 import { Link } from 'react-router-dom';
-import type { TransferRequest, Assignment } from '../types';
+import type { TransferRequest, Assignment, MicDocument } from '../types';
 import { formatDistanceToNow } from 'date-fns';
 
 export default function DashboardPage() {
@@ -14,7 +18,10 @@ export default function DashboardPage() {
   const { data: users } = useUsers();
 
   const isManager = user?.role === 'admin' || user?.role === 'manager';
+  const { data: pendingMic } = usePendingMic(isManager);
+
   const pendingCount = Array.isArray(pending) ? pending.length : 0;
+  const pendingMicList: MicDocument[] = Array.isArray(pendingMic) ? pendingMic : [];
   const assignmentList: Assignment[] = Array.isArray(assignments) ? assignments : [];
   const inventoryList = Array.isArray(inventory) ? inventory : [];
   const userList = Array.isArray(users) ? users : [];
@@ -111,6 +118,46 @@ export default function DashboardPage() {
                     </div>
                   </div>
                   <Link to="/transfers" className="btn btn-ghost btn-sm">Review</Link>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Installation confirmations awaiting sign-off */}
+        {isManager && pendingMicList.length > 0 && (
+          <div className="card" style={{ gridColumn: '1 / -1' }}>
+            <div className="flex items-center justify-between" style={{ marginBottom: 16 }}>
+              <div className="flex items-center gap-2">
+                <ClipboardCheck size={16} color="var(--yellow)" />
+                <span style={{ fontFamily: 'var(--font-display)', fontWeight: 600 }}>
+                  MIC Forms Pending Approval
+                </span>
+                <span className="badge badge-yellow">{pendingMicList.length}</span>
+              </div>
+              <Link to="/forms/mic" className="btn btn-ghost btn-sm">View all</Link>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {pendingMicList.slice(0, 3).map(mic => (
+                <div key={mic.id} style={{
+                  background: 'var(--bg-3)', borderRadius: 'var(--radius)',
+                  padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                }}>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 500 }}>
+                      <span style={{ color: 'var(--accent)' }}>{mic.micNo}</span>
+                      {mic.siteId && <span style={{ color: 'var(--text-2)', marginLeft: 8 }}>{mic.siteId}</span>}
+                    </div>
+                    <div style={{ fontSize: 12, color: 'var(--text-2)', marginTop: 3 }}>
+                      {mic.installedBy
+                        ? `${mic.installedBy.firstName} ${mic.installedBy.lastName}`
+                        : 'Unknown installer'}
+                      <span style={{ marginLeft: 8, color: 'var(--text-3)' }}>
+                        {formatDistanceToNow(new Date(mic.createdAt), { addSuffix: true })}
+                      </span>
+                    </div>
+                  </div>
+                  <Link to="/forms/mic" className="btn btn-ghost btn-sm">Review</Link>
                 </div>
               ))}
             </div>

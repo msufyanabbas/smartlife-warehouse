@@ -9,6 +9,7 @@ import { Repository } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import { User } from './entities/user.entity';
 import { CreateUserDto, UpdateUserDto } from './dto/user.dto';
+import { Role } from '../common/enums/role.enum';
 
 @Injectable()
 export class UsersService {
@@ -64,6 +65,22 @@ export class UsersService {
     user.isActive = false;
     await this.userRepository.save(user);
     return { message: 'User deactivated successfully' };
+  }
+
+  /**
+   * Everyone who can sign off a document. Unlike the rest of this service it is
+   * reachable by workers — the person filling in a form has to be able to name
+   * their approver — so it returns names and nothing else.
+   */
+  async findApprovers() {
+    return this.userRepository.find({
+      where: [
+        { role: Role.ADMIN, isActive: true },
+        { role: Role.MANAGER, isActive: true },
+      ],
+      select: ['id', 'firstName', 'lastName', 'role'],
+      order: { firstName: 'ASC' },
+    });
   }
 
   async findWorkers() {

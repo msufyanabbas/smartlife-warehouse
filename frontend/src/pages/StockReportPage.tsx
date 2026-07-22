@@ -1,11 +1,12 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, type ReactNode } from 'react';
 import * as XLSX from 'xlsx';
-import { BarChart2, Download, Search, Filter } from 'lucide-react';
+import { BarChart2, ClipboardCheck, Download, Search, Filter } from 'lucide-react';
 import { format, startOfMonth, endOfMonth, subMonths } from 'date-fns';
 import { useInventory, useItemUsage, useGrnList, useAssignmentForms } from '../hooks/useApi';
 import MultiSelect from '../components/MultiSelect';
 import SerialNumbers from '../components/SerialNumbers';
 import AssignedUsedReport from './AssignedUsedReport';
+import InstallationsReport from './InstallationsReport';
 
 /**
  * Only the identifying and display fields, deliberately.
@@ -87,17 +88,17 @@ const QUICK_RANGES = [
   { label: 'This Year', getValue: () => ({ from: `${new Date().getFullYear()}-01-01`, to: `${new Date().getFullYear()}-12-31` }) },
 ];
 
-type ReportTab = 'movement' | 'assigned-used';
+type ReportTab = 'movement' | 'assigned-used' | 'installations';
 
 export default function StockReportPage() {
   const [tab, setTab] = useState<ReportTab>('movement');
 
-  const tabButton = (value: ReportTab, label: string) => (
+  const tabButton = (value: ReportTab, label: string, icon?: ReactNode) => (
     <button
       className={`btn btn-sm ${tab === value ? 'btn-primary' : 'btn-ghost'}`}
       onClick={() => setTab(value)}
     >
-      {label}
+      {icon}{label}
     </button>
   );
 
@@ -105,15 +106,18 @@ export default function StockReportPage() {
     <div className="page">
       <div className="page-header">
         <h1>Reports</h1>
-        <p>Stock movement and items issued on assignment forms</p>
+        <p>Stock movement, items issued on assignment forms, and site installations</p>
       </div>
 
       <div className="flex gap-2" style={{ marginBottom: 20 }}>
         {tabButton('movement', 'Stock Movement')}
         {tabButton('assigned-used', 'Issued Items (ASN)')}
+        {tabButton('installations', 'Installations', <ClipboardCheck size={13} />)}
       </div>
 
-      {tab === 'movement' ? <StockMovementReport /> : <AssignedUsedReport />}
+      {tab === 'movement' && <StockMovementReport />}
+      {tab === 'assigned-used' && <AssignedUsedReport />}
+      {tab === 'installations' && <InstallationsReport />}
     </div>
   );
 }

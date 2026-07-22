@@ -203,7 +203,7 @@ export default function UsersPage() {
       <div className="page-header flex items-center justify-between">
         <div>
           <h1>Users</h1>
-          <p>{(users as User[]).filter(u => u.isActive).length} active members</p>
+          <p>{(users as User[]).filter(u => u.isActive).length} team members</p>
         </div>
         {isAdmin && (
           <button className="btn btn-primary" onClick={openCreate}>

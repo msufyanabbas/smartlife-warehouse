@@ -111,8 +111,8 @@ function AssignmentFormList({ onNew, onOpen }: { onNew: () => void; onOpen: (id:
     <div className="page">
       <div className="page-header flex items-center justify-between">
         <div>
-          <h1>Stock Assigning</h1>
-          <p>Material Assignment Records · {list.length} document{list.length === 1 ? '' : 's'}</p>
+          <h1>Assignment Forms</h1>
+          <p>{list.length} document{list.length === 1 ? '' : 's'}</p>
         </div>
         <button className="btn btn-primary" onClick={onNew}>
           <Plus size={14} /> New Assignment

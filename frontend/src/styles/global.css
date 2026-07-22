@@ -126,20 +126,23 @@ a { text-decoration: none; color: inherit; }
   padding-bottom: 20px;
   border-bottom: 1px solid var(--border);
 }
+/* Plain bold, body font, no gradient. A gradient reads as decoration on a
+   heading you are meant to scan past, and it costs legibility for nothing. The
+   brand gradient stays where it earns its keep: the wordmark, primary actions
+   and the document title bar. */
 .page-header h1 {
-  font-family: var(--font-display);
-  font-size: 28px;
+  font-family: var(--font-body);
+  font-size: 26px;
   font-weight: 800;
+  color: var(--text);
   letter-spacing: -0.5px;
-  background: var(--brand-gradient);
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  color: transparent;
-  /* The gradient paints over the glyphs, so give descenders room to clear. */
-  padding-bottom: 2px;
+  line-height: 1.2;
+  margin: 0 0 4px;
 }
-.page-header p { color: var(--text-3); font-size: 13px; margin-top: 4px; }
+.page-header p { color: var(--text-3); font-size: 13px; margin: 0; }
+
+/* Belt and braces: no heading anywhere inherits a gradient fill. */
+h1 { background: none; -webkit-text-fill-color: currentColor; }
 
 /* Cards */
 .card {
@@ -348,24 +351,41 @@ select.form-input option { background: var(--bg-4); }
 @keyframes slideUp { from { transform: translateY(16px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
 
 /* Sidebar nav */
+/* Section heading above each group of links. */
+.sidebar-section-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  padding: 16px 16px 6px;
+}
+
 .nav-item {
   display: flex; align-items: center; gap: 10px;
-  padding: 9px 16px; border-radius: var(--radius);
-  margin: 2px 8px; color: var(--text-2);
+  border-radius: var(--radius);
+  color: var(--text-2);
   font-size: 13px; font-weight: 500; letter-spacing: 0.01em;
   transition: all 0.15s; cursor: pointer;
   text-decoration: none;
-  /* Carried by every item, coloured only when active, so selecting one does
-     not shove its label sideways. */
-  border-left: 3px solid transparent;
+  /* The active item runs to the sidebar's edge while the rest are inset. The
+     margin it drops is added back as padding so the icons stay in one column
+     and nothing shifts as the selection moves. */
+  border-left: 2px solid transparent;
+  margin: 2px 8px;
+  padding: 9px 16px 9px 17px;
 }
-.nav-item:hover { background: rgba(123,63,228,0.08); color: var(--text); }
+.nav-item:hover:not(.active) { background: rgba(255,255,255,0.04); color: var(--text); }
 .nav-item.active {
   background: var(--accent-dim);
   color: var(--accent);
   border-left-color: var(--accent);
+  border-radius: 0 8px 8px 0;
   font-weight: 600;
+  margin-left: 0;
+  padding-left: 25px;
 }
+[data-theme="light"] .nav-item:hover:not(.active) { background: rgba(107,47,217,0.06); }
 .nav-item .badge-count {
   margin-left: auto; background: var(--red);
   color: #fff; font-size: 10px; font-weight: 700;
@@ -433,14 +453,12 @@ select.form-input option { background: var(--bg-4); }
 [data-theme="light"] tbody tr:hover { background: rgba(107,47,217,0.04); }
 [data-theme="light"] .search-bar { background: var(--bg-2); }
 [data-theme="light"] .search-bar:focus-within { box-shadow: 0 0 0 3px rgba(107,47,217,0.1); }
-[data-theme="light"] .nav-item:hover { background: rgba(107,47,217,0.06); }
 [data-theme="light"] .nav-item.active { background: var(--accent-dim); }
 [data-theme="light"] .btn-ghost { border-color: var(--border); color: var(--text-2); }
 [data-theme="light"] .btn-ghost:hover { background: var(--bg-3); }
 [data-theme="light"] .badge-gray { background: rgba(26,16,51,0.05); color: var(--text-3); }
 /* `background-image` rather than the `background` shorthand, which would reset
    `background-clip` back to border-box and paint over the glyphs. */
-[data-theme="light"] .page-header h1,
 [data-theme="light"] .brand-gradient-text { background-image: var(--brand-gradient-ink); }
 [data-theme="light"] .card { box-shadow: 0 2px 12px rgba(26,16,51,0.06); }
 [data-theme="light"] .sidebar {
@@ -654,7 +672,6 @@ select.form-input option { background: var(--bg-4); }
   /* Gradient-clipped text relies on a painted background. Printers routinely
      drop those, which would render the heading invisible rather than merely
      unbranded, so it falls back to solid ink. */
-  .page-header h1,
   .brand-gradient-text,
   .doc-company-name {
     background: none !important;

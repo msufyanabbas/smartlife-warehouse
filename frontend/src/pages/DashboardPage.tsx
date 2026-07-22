@@ -38,7 +38,12 @@ export default function DashboardPage() {
   return (
     <div className="page">
       <div className="page-header" style={{ marginBottom: 32 }}>
-        <h1 style={{ fontSize: 26 }}>{greeting()}, {user?.firstName} 👋</h1>
+        <div style={{
+          fontSize: 13, color: 'var(--text-3)', fontWeight: 500, marginBottom: 2,
+        }}>
+          {greeting()},
+        </div>
+        <h1>{user?.firstName} {user?.lastName}</h1>
         <p>Here's what's happening in your warehouse today.</p>
       </div>
 

@@ -45,45 +45,45 @@ export default function Sidebar() {
   return (
     <aside className="sidebar">
 
-      {/* ── Logo ── */}
-      <div style={{ padding: '16px', borderBottom: '1px solid var(--border)' }}>
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 12,
-          background: 'rgba(255,255,255,0.03)',
-          padding: '8px 10px',
-          borderRadius: 12,
-          border: '1px solid rgba(255,255,255,0.05)',
-        }}>
-          <div style={{
-            width: 56, height: 32,
-            backgroundColor: '#fff',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            borderRadius: 10,
-            boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
-            overflow: 'hidden',
-            flexShrink: 0,
-          }}>
-            <img
-              src="/smartlife.png"
-              alt="Smart Life Logo"
-              style={{ width: '85%', height: '85%', objectFit: 'contain' }}
-            />
-          </div>
-          <div>
-            <div className="brand-gradient-text" style={{
-              fontFamily: 'var(--font-display)',
-              fontWeight: 800, fontSize: 20,
-              letterSpacing: '-0.5px',
+      {/* ── App header ── */}
+      <div style={{
+        padding: '16px 16px 14px',
+        borderBottom: '1px solid var(--border)',
+        marginBottom: 8,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <img
+            src="/smartlife.png"
+            alt="Smart Life"
+            style={{
+              height: 32,
+              width: 'auto',
+              flexShrink: 0,
+            }}
+          />
+
+          <div style={{ minWidth: 0 }}>
+            <div style={{
+              fontSize: 15,
+              fontWeight: 700,
+              color: 'var(--text)',
+              letterSpacing: '-0.3px',
+              lineHeight: 1.2,
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
             }}>
               StockFlow
             </div>
             <div style={{
-              fontSize: 10, color: 'var(--text-3)',
-              textTransform: 'uppercase', letterSpacing: '0.1em', marginTop: -1,
+              fontSize: 10,
+              color: 'var(--text-3)',
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              marginTop: 1,
             }}>
-              Inventory System
+              Warehouse Management
             </div>
           </div>
         </div>
@@ -91,7 +91,7 @@ export default function Sidebar() {
 
       {/* ── Navigation ── */}
       <nav style={{ flex: 1, padding: '12px 8px', overflowY: 'auto' }}>
-        <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-3)', padding: '4px 16px 8px', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+        <div className="sidebar-section-label">
           Main
         </div>
 
@@ -108,7 +108,7 @@ export default function Sidebar() {
           <ClipboardList size={16} /> Assignments
         </NavLink>
 
-        <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-3)', padding: '16px 16px 8px', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+        <div className="sidebar-section-label">
           Requests
         </div>
 
@@ -132,7 +132,7 @@ export default function Sidebar() {
             is reachable without the rest of the manager-only Documents section. */}
         {!isManager && (
           <>
-            <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-3)', padding: '16px 16px 8px', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+            <div className="sidebar-section-label">
               Documents
             </div>
             <NavLink to="/forms/mic" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
@@ -143,7 +143,7 @@ export default function Sidebar() {
 
         {isManager && (
           <>
-            <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-3)', padding: '16px 16px 8px', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+            <div className="sidebar-section-label">
               Documents
             </div>
             <NavLink to="/forms/grn" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
@@ -160,7 +160,7 @@ export default function Sidebar() {
               {pendingMicCount > 0 && <span className="badge-count">{pendingMicCount}</span>}
             </NavLink>
 
-            <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-3)', padding: '16px 16px 8px', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+            <div className="sidebar-section-label">
               Catalog
             </div>
             <NavLink to="/categories" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
@@ -169,7 +169,7 @@ export default function Sidebar() {
             <NavLink to="/products" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
               <FolderOpen size={16} /> Products
             </NavLink>
-            <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-3)', padding: '16px 16px 8px', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+            <div className="sidebar-section-label">
               Management
             </div>
             <NavLink to="/users" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>

@@ -222,7 +222,10 @@ export default function AssignmentsPage() {
   return (
     <div className="page">
       <div className="page-header flex items-center justify-between">
-        <div><h1>Assignments</h1><p>{list.length} assignment{list.length !== 1 ? 's' : ''}</p></div>
+        <div>
+          <h1>Assignments</h1>
+          <p>{list.length} active assignment{list.length !== 1 ? 's' : ''}</p>
+        </div>
         <div className="flex gap-2">
           <button className="btn btn-ghost" onClick={exportExcel}><Download size={14} /> Export</button>
           {isManager && (

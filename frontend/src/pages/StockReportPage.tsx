@@ -106,7 +106,7 @@ export default function StockReportPage() {
     <div className="page">
       <div className="page-header">
         <h1>Reports</h1>
-        <p>Stock movement, items issued on assignment forms, and site installations</p>
+        <p>Stock movement and assigned / used item history</p>
       </div>
 
       <div className="flex gap-2" style={{ marginBottom: 20 }}>

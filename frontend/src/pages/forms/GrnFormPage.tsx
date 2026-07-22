@@ -72,8 +72,8 @@ function GrnList({ onNew, onOpen }: { onNew: () => void; onOpen: (id: string) =>
     <div className="page">
       <div className="page-header flex items-center justify-between">
         <div>
-          <h1>Stock Receiving (GRN)</h1>
-          <p>Goods Receipt Notes · {list.length} document{list.length === 1 ? '' : 's'}</p>
+          <h1>Goods Receipt Notes</h1>
+          <p>{list.length} document{list.length === 1 ? '' : 's'}</p>
         </div>
         <button className="btn btn-primary" onClick={onNew}>
           <Plus size={14} /> New GRN

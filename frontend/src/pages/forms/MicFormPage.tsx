@@ -137,8 +137,8 @@ function MicList({ onNew, onOpen }: { onNew: () => void; onOpen: (id: string) =>
     <div className="page">
       <div className="page-header flex items-center justify-between">
         <div>
-          <h1>Material Installation (MIC)</h1>
-          <p>Installation confirmations · {list.length} document{list.length === 1 ? '' : 's'}</p>
+          <h1>Material Installation</h1>
+          <p>{list.length} document{list.length === 1 ? '' : 's'}</p>
         </div>
         <button className="btn btn-primary" onClick={onNew}>
           <Plus size={14} /> New MIC

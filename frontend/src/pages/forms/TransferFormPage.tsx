@@ -91,8 +91,8 @@ function TransferFormList({ onNew, onOpen }: { onNew: () => void; onOpen: (id: s
     <div className="page">
       <div className="page-header flex items-center justify-between">
         <div>
-          <h1>Stock Transfer</h1>
-          <p>Inter-location / inter-project transfers · {list.length} document{list.length === 1 ? '' : 's'}</p>
+          <h1>Transfer Forms</h1>
+          <p>{list.length} document{list.length === 1 ? '' : 's'}</p>
         </div>
         <button className="btn btn-primary" onClick={onNew}>
           <Plus size={14} /> New Transfer

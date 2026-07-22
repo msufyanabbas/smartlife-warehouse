@@ -37,6 +37,7 @@ const ROW_STATUS_BADGE: Record<MicItemStatus, string> = {
 
 const STATUS_TABS: { value: '' | MicStatus; label: string }[] = [
   { value: '', label: 'All' },
+  { value: 'draft', label: 'Draft' },
   { value: 'pending_approval', label: 'Pending' },
   { value: 'approved', label: 'Approved' },
   { value: 'rejected', label: 'Rejected' },
@@ -54,14 +55,15 @@ function parseDate(value: string): Date {
 }
 
 /**
- * What has actually been fitted on site, one row per installed line rather than
- * one per document — a single MIC covers a whole visit, and the question this
- * answers is "where did this item end up", not "how many forms were filed".
+ * What has been recorded against site installations, one row per line rather
+ * than one per document — a single MIC covers a whole visit, and the question
+ * this answers is "where did this item end up", not "how many forms were filed".
  *
- * Drafts are left out: a form nobody has submitted is a worker's scratch pad,
- * not a record of anything. Approved is the default view for the same reason —
- * it is the only status that means the install was confirmed by someone else —
- * with the other statuses a tab away for chasing what is still outstanding.
+ * Deliberately unfiltered on open: every form at every status, including drafts
+ * and lines whose quantity has not been entered yet. A report that silently
+ * drops what it considers unfinished reads as "no data" when the real answer is
+ * "not confirmed yet", so the status of each line and each form is shown in the
+ * table and left to the reader to filter down from.
  */
 export default function InstallationsReport() {
   const { user } = useAuth();
@@ -72,7 +74,7 @@ export default function InstallationsReport() {
   const [siteFilter, setSiteFilter] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'' | MicStatus>('approved');
+  const [statusFilter, setStatusFilter] = useState<'' | MicStatus>('');
 
   const isManager = user?.role === 'admin' || user?.role === 'manager';
 
@@ -81,7 +83,7 @@ export default function InstallationsReport() {
 
     return documents
       // A worker sees their own installs; only a manager sees everyone's.
-      .filter(mic => mic.status !== 'draft' && (isManager || mic.installedById === user?.id))
+      .filter(mic => isManager || mic.installedById === user?.id)
       .flatMap(mic => {
         // `installedBy` is an eager relation, so the name arrives with the
         // document — no separate user lookup, and it resolves whoever filled the
@@ -92,7 +94,9 @@ export default function InstallationsReport() {
 
         return (mic.items ?? [])
           .map((line, index) => ({ line, index }))
-          .filter(({ line }) => line.itemCode?.trim() && (line.qtyInstalled ?? 0) > 0)
+          // A line with no quantity yet is still something the worker entered —
+          // it belongs in the report as outstanding, not hidden as absent.
+          .filter(({ line }) => line.itemCode?.trim())
           .map(({ line, index }): InstallationRow => ({
             id: `${mic.id}:${index}`,
             installationNo: mic.micNo,
@@ -172,9 +176,9 @@ export default function InstallationsReport() {
 
   const clearFilters = () => {
     setSearch(''); setWorkerFilter(''); setSiteFilter('');
-    setDateFrom(''); setDateTo(''); setStatusFilter('approved');
+    setDateFrom(''); setDateTo(''); setStatusFilter('');
   };
-  const hasFilters = search || workerFilter || siteFilter || dateFrom || dateTo || statusFilter !== 'approved';
+  const hasFilters = search || workerFilter || siteFilter || dateFrom || dateTo || statusFilter;
 
   const statCard = (label: string, value: number, color: string, bg: string) => (
     <div style={{ flex: 1, background: bg, border: `1px solid ${color}33`, borderRadius: 'var(--radius-lg)', padding: '16px 20px' }}>
@@ -247,7 +251,7 @@ export default function InstallationsReport() {
 
       {/* Summary cards */}
       <div style={{ display: 'flex', gap: 12, marginBottom: 24 }}>
-        {statCard('Installed Lines', rows.length, 'var(--text)', 'var(--bg-2)')}
+        {statCard('Line Items', rows.length, 'var(--text)', 'var(--bg-2)')}
         {statCard('Qty Installed', totals.installed, 'var(--green)', 'var(--green-dim)')}
         {statCard('Unique Sites', totals.sites, 'var(--accent)', 'var(--accent-dim)')}
         {statCard('MIC Forms', totals.forms, 'var(--purple)', 'var(--purple-dim)')}
@@ -258,7 +262,7 @@ export default function InstallationsReport() {
       ) : rows.length === 0 ? (
         <div className="empty-state">
           <ClipboardCheck size={48} />
-          <span>No installed lines match these filters</span>
+          <span>No MIC line items match these filters</span>
         </div>
       ) : (
         <div className="table-wrap">
@@ -294,8 +298,11 @@ export default function InstallationsReport() {
                   </td>
                   <td style={{ fontWeight: 500 }}>{row.itemDescription || '—'}</td>
                   <td style={{ fontSize: 12, color: 'var(--text-2)' }}>{row.unit || '—'}</td>
-                  <td style={{ textAlign: 'center', fontWeight: 700, color: 'var(--green)' }}>
-                    {row.qtyInstalled}
+                  <td style={{
+                    textAlign: 'center', fontWeight: 700,
+                    color: row.qtyInstalled > 0 ? 'var(--green)' : 'var(--text-3)',
+                  }}>
+                    {row.qtyInstalled || '—'}
                   </td>
                   <td style={{ fontSize: 12, color: 'var(--text-2)' }}>
                     <SerialNumbers value={row.serialNumbers} />
@@ -326,7 +333,7 @@ export default function InstallationsReport() {
 
       <div style={{ marginTop: 16, padding: '12px 16px', background: 'var(--bg-2)', borderRadius: 'var(--radius)', border: '1px solid var(--border)', fontSize: 12, color: 'var(--text-3)' }}>
         <strong style={{ color: 'var(--text-2)' }}>How it works:</strong>
-        {' '}One row per installed line across every Material Installation Confirmation, read straight off the documents. Draft forms are excluded, and the view opens on <strong style={{ color: 'var(--text-2)' }}>Approved</strong> — the only status that means a second person confirmed the install. Switch tabs to chase what is still pending or was sent back. Lines with a zero Qty Installed are not installations and are left out.
+        {' '}One row per line item across every Material Installation Confirmation, read straight off the documents. Nothing is hidden on open — drafts, lines still awaiting approval and lines with no quantity entered yet all appear, so an empty table means no MIC has been raised rather than none has been signed off. Use the status tabs to narrow to <strong style={{ color: 'var(--text-2)' }}>Approved</strong>, the only status meaning a second person confirmed the install.
       </div>
     </div>
   );

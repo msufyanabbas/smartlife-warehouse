@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ArrowLeft, ClipboardList, Plus, Printer, Save } from 'lucide-react';
+import { ArrowLeft, ClipboardList, Eye, Plus, Printer, Save } from 'lucide-react';
 import { format } from 'date-fns';
 import toast from 'react-hot-toast';
 import {
@@ -9,11 +9,14 @@ import DocumentHeader from '../../components/documents/DocumentHeader';
 import DocumentStatusBadge from '../../components/documents/DocumentStatusBadge';
 import SignatureFooter from '../../components/documents/SignatureFooter';
 import Field from '../../components/documents/Field';
+import PrintDocument, { type PrintColumn } from '../../components/documents/PrintDocument';
 import LineItemsTable from '../../components/documents/LineItemsTable';
 import {
   stripEmptyRows, toLineRows, type LineColumn, type LineRow,
 } from '../../components/documents/lineRows';
-import { fullName, orUndefined, toDateInput, today } from '../../components/documents/formUtils';
+import {
+  fullName, orUndefined, printDate, printSerials, toDateInput, today,
+} from '../../components/documents/formUtils';
 import { useDocumentStock } from '../../hooks/useDocumentStock';
 import type { AssignmentForm, User } from '../../types';
 
@@ -22,6 +25,18 @@ const ROW_DEFAULTS = { stockAvailable: 0, qtyRequested: 0, qtyApproved: 0, qtyIs
 
 const DEPARTMENTS = ['Warehouse', 'Logistics', 'Safety', 'Maintenance', 'Operations', 'Management'];
 
+// Stock Available is absent by design: what happened to be on the shelf the day
+// the form was typed says nothing about the hand-out the paper record documents.
+const PRINT_COLUMNS: PrintColumn[] = [
+  { key: 'itemCode', label: 'Item Code', strong: true },
+  { key: 'itemDescription', label: 'Description' },
+  { key: 'unit', label: 'Unit', align: 'center' },
+  { key: 'qtyRequested', label: 'Requested', align: 'center' },
+  { key: 'qtyApproved', label: 'Approved', align: 'center' },
+  { key: 'qtyIssued', label: 'Issued', align: 'center', strong: true },
+  { key: 'serialNumber', label: 'Serial Number(s)', render: row => printSerials(row.serialNumber) },
+];
+
 const COLUMNS: LineColumn[] = [
   { key: 'itemCode', label: 'Item Code', width: '11%' },
   { key: 'itemDescription', label: 'Item Description', width: '24%' },
@@ -29,6 +44,9 @@ const COLUMNS: LineColumn[] = [
   {
     key: 'stockAvailable', label: 'Stock Available', type: 'readonly', width: '9%',
     hint: 'Based on GRN receipts minus ASN assignments',
+    // A working figure for whoever fills the form in — what was on hand that
+    // day says nothing about the hand-out the paper record documents.
+    hideOnPrint: true,
   },
   { key: 'qtyRequested', label: 'Qty Requested', type: 'number', width: '9%' },
   { key: 'qtyApproved', label: 'Qty Approved', type: 'number', width: '9%' },
@@ -213,11 +231,18 @@ function AssignmentEditor({ id, doc, onClose, onCreated }: {
 
   const [form, setForm] = useState<FormState>(() => toFormState(doc));
   const [rows, setRows] = useState<LineRow[]>(() => toLineRows(doc?.items, MIN_ROWS, ROW_DEFAULTS));
+  const [preview, setPreview] = useState(false);
 
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) =>
     setForm(prev => ({ ...prev, [key]: value }));
 
   const alreadyIssued = doc?.status === 'issued';
+
+  const nameOf = (id: string, withRole = false) => {
+    const match = (users as User[]).find(u => u.id === id);
+    if (!match) return '';
+    return withRole ? `${fullName(match)} · ${match.role}` : fullName(match);
+  };
 
   const save = async (status: AssignmentForm['status']) => {
     // Issuing moves real stock out of `available`, and the backend only does it
@@ -278,6 +303,9 @@ function AssignmentEditor({ id, doc, onClose, onCreated }: {
         </button>
         <div className="flex gap-2 items-center">
           <DocumentStatusBadge status={form.status} />
+          <button className="btn btn-ghost btn-sm" onClick={() => setPreview(p => !p)}>
+            <Eye size={14} /> {preview ? 'Edit' : 'Preview'}
+          </button>
           <button className="btn btn-ghost btn-sm" onClick={() => window.print()} disabled={!id}>
             <Printer size={14} /> Print
           </button>
@@ -293,7 +321,7 @@ function AssignmentEditor({ id, doc, onClose, onCreated }: {
         </div>
       </div>
 
-      <div className="doc-paper print-doc">
+      <div className="doc-paper no-print" style={preview ? { display: 'none' } : undefined}>
         <DocumentHeader
           title="STOCK ASSIGNING"
           refLabel="Assignment No."
@@ -372,6 +400,28 @@ function AssignmentEditor({ id, doc, onClose, onCreated }: {
           labels={['Requested By', 'Approved By', 'Store / Issuing Officer', 'Recipient Signature']}
         />
       </div>
+
+      <PrintDocument
+        preview={preview}
+        docLabel="Assignment No."
+        docNumber={doc?.assignmentNo}
+        title="Stock Assigning Form"
+        fields={[
+          { label: 'Date', value: printDate(form.date) },
+          { label: 'Priority', value: form.priority },
+          { label: 'Requested By', value: nameOf(form.requestedById) },
+          { label: 'Department', value: form.department },
+          { label: 'Project / Site', value: form.projectSite },
+          { label: 'Assigned To', value: nameOf(form.assignedToId, true) },
+        ]}
+        purpose={{ label: 'Purpose / Description', value: form.purposeDescription }}
+        columns={PRINT_COLUMNS}
+        rows={rows}
+        totalKey="qtyIssued"
+        totalLabel="Total Quantity Assigned"
+        notes={{ label: 'Notes / Special Instructions', value: form.notes }}
+        signatures={['Requested By', 'Approved By', 'Store / Issuing Officer', 'Recipient']}
+      />
     </div>
   );
 }

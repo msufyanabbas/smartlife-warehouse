@@ -218,7 +218,7 @@ export interface TransferFormLineItem {
   itemId?: string;
 }
 
-export type MicItemStatus = 'Installed' | 'Partial' | 'Pending' | 'Damaged';
+export type MicItemStatus = 'Installed' | 'Partial' | 'Pending' | 'Damaged' | 'Delivered';
 export type MicStatus = 'draft' | 'pending_approval' | 'approved' | 'rejected';
 
 export interface MicDocument {

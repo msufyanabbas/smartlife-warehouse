@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ArrowLeft, ArrowLeftRight, Plus, Printer, Save } from 'lucide-react';
+import { ArrowLeft, ArrowLeftRight, Eye, Plus, Printer, Save } from 'lucide-react';
 import { format } from 'date-fns';
 import toast from 'react-hot-toast';
 import {
@@ -10,11 +10,14 @@ import DocumentHeader from '../../components/documents/DocumentHeader';
 import DocumentStatusBadge from '../../components/documents/DocumentStatusBadge';
 import SignatureFooter from '../../components/documents/SignatureFooter';
 import Field from '../../components/documents/Field';
+import PrintDocument, { type PrintColumn } from '../../components/documents/PrintDocument';
 import LineItemsTable from '../../components/documents/LineItemsTable';
 import {
   stripEmptyRows, toLineRows, type LineColumn, type LineRow,
 } from '../../components/documents/lineRows';
-import { fullName, orUndefined, toDateInput, today, uniqueSorted } from '../../components/documents/formUtils';
+import {
+  fullName, orUndefined, printDate, printSerials, toDateInput, today, uniqueSorted,
+} from '../../components/documents/formUtils';
 import { useDocumentStock } from '../../hooks/useDocumentStock';
 import type { TransferForm, User } from '../../types';
 
@@ -28,6 +31,8 @@ const COLUMNS: LineColumn[] = [
   {
     key: 'stockQty', label: 'Stock Qty (From)', type: 'readonly', width: '11%',
     hint: 'Based on GRN receipts minus ASN assignments',
+    // Working figure only — see the assignment form's Stock Available column.
+    hideOnPrint: true,
   },
   {
     key: 'qtyToTransfer', label: 'Qty to Transfer', type: 'number', width: '11%',
@@ -46,6 +51,15 @@ const COLUMNS: LineColumn[] = [
     key: 'serialNumber', label: 'Serial Number(s)', type: 'serial', qtyKey: 'qtyToTransfer',
     width: '17%', hint: 'Serial Number(s) — enter one for the line, or one per unit transferred',
   },
+];
+
+// Stock Qty is absent by design — see the assignment form's print columns.
+const PRINT_COLUMNS: PrintColumn[] = [
+  { key: 'itemCode', label: 'Item Code', strong: true },
+  { key: 'itemDescription', label: 'Description' },
+  { key: 'unit', label: 'Unit', align: 'center' },
+  { key: 'qtyToTransfer', label: 'Qty to Transfer', align: 'center', strong: true },
+  { key: 'serialNumber', label: 'Serial Number(s)', render: row => printSerials(row.serialNumber) },
 ];
 
 export default function TransferFormPage() {
@@ -206,12 +220,19 @@ function TransferEditor({ id, doc, onClose, onCreated }: {
   const [form, setForm] = useState<FormState>(() => toFormState(doc));
   const [rows, setRows] = useState<LineRow[]>(() => toLineRows(doc?.items, MIN_ROWS, ROW_DEFAULTS));
 
+  const [preview, setPreview] = useState(false);
+
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) =>
     setForm(prev => ({ ...prev, [key]: value }));
 
   const stock = inventory as any[];
   const sites = uniqueSorted(stock.flatMap(i => [i.projectName, i.schemeNo]));
   const approvers = (users as User[]).filter(u => u.role === 'admin' || u.role === 'manager');
+
+  const nameOf = (userId: string) => {
+    const match = (users as User[]).find(u => u.id === userId);
+    return match ? fullName(match) : '';
+  };
 
   // "Stock at the From location" — matched against either project or scheme.
   const filterStock = (item: { projectName?: string; schemeNo?: string }) =>
@@ -257,6 +278,9 @@ function TransferEditor({ id, doc, onClose, onCreated }: {
         </button>
         <div className="flex gap-2 items-center">
           <DocumentStatusBadge status={form.status} />
+          <button className="btn btn-ghost btn-sm" onClick={() => setPreview(p => !p)}>
+            <Eye size={14} /> {preview ? 'Edit' : 'Preview'}
+          </button>
           <button className="btn btn-ghost btn-sm" onClick={() => window.print()} disabled={!id}>
             <Printer size={14} /> Print
           </button>
@@ -272,7 +296,7 @@ function TransferEditor({ id, doc, onClose, onCreated }: {
         </div>
       </div>
 
-      <div className="doc-paper print-doc">
+      <div className="doc-paper no-print" style={preview ? { display: 'none' } : undefined}>
         <DocumentHeader
           title="STOCK TRANSFER"
           refLabel="Transfer No."
@@ -364,6 +388,42 @@ function TransferEditor({ id, doc, onClose, onCreated }: {
 
         <SignatureFooter labels={['Issued By (Store)', 'Approved By', 'Received By (Store)']} />
       </div>
+
+      <PrintDocument
+        preview={preview}
+        docLabel="Transfer No."
+        docNumber={doc?.transferNo}
+        title="Stock Transfer"
+        fields={[
+          { label: 'Transfer Date', value: printDate(form.transferDate) },
+          { label: 'Reason for Transfer', value: form.reasonForTransfer },
+          { label: 'Approved By', value: nameOf(form.approvedById) },
+        ]}
+        fieldGroups={[
+          {
+            title: 'From',
+            fields: [
+              { label: 'Warehouse / Store', value: form.fromWarehouse },
+              { label: 'Project / Site', value: form.fromProjectSite },
+              { label: 'Issued By', value: nameOf(form.issuedById) },
+            ],
+          },
+          {
+            title: 'To',
+            fields: [
+              { label: 'Warehouse / Store', value: form.toWarehouse },
+              { label: 'Project / Site', value: form.toProjectSite },
+              { label: 'Received By', value: nameOf(form.receivedById) },
+            ],
+          },
+        ]}
+        columns={PRINT_COLUMNS}
+        rows={rows}
+        totalKey="qtyToTransfer"
+        totalLabel="Total Quantity Transferred"
+        notes={{ label: 'Notes / Remarks', value: form.notes }}
+        signatures={['Issued By', 'Approved By', 'Received By']}
+      />
     </div>
   );
 }

@@ -228,19 +228,28 @@ export default function LineItemsTable({
 
   const totalIndex = totalKey ? columns.findIndex(c => c.key === totalKey) : -1;
   const trailingCols = columns.length - totalIndex - 1 + (readOnly ? 0 : 1);
+  // Every column dropped from the printed table shifts the footer's leading
+  // colSpan left by one, which would otherwise slide the total under the wrong
+  // heading on paper. The label is emitted twice: once per medium.
+  const hiddenBeforeTotal = totalIndex >= 0
+    ? columns.slice(0, totalIndex).filter(c => c.hideOnPrint).length
+    : 0;
+  const printClass = (column: LineColumn) => (column.hideOnPrint ? 'hide-on-print' : undefined);
 
   return (
     <div>
       <table className="doc-table">
         <colgroup>
           <col style={{ width: 34 }} />
-          {columns.map(c => <col key={c.key} style={{ width: c.width }} />)}
+          {columns.map(c => <col key={c.key} style={{ width: c.width }} className={printClass(c)} />)}
           {!readOnly && <col style={{ width: 28 }} className="no-print" />}
         </colgroup>
         <thead>
           <tr>
             <th>#</th>
-            {columns.map(c => <th key={c.key} title={c.hint}>{c.label}</th>)}
+            {columns.map(c => (
+              <th key={c.key} title={c.hint} className={printClass(c)}>{c.label}</th>
+            ))}
             {!readOnly && <th className="no-print" />}
           </tr>
         </thead>
@@ -249,7 +258,7 @@ export default function LineItemsTable({
             <tr key={row._key}>
               <td className="doc-cell-num">{index + 1}</td>
               {columns.map((col, colIndex) => (
-                <td key={col.key}>
+                <td key={col.key} className={printClass(col)}>
                   {colIndex === 0 ? (
                     <ItemCodePicker
                       row={row}
@@ -286,9 +295,22 @@ export default function LineItemsTable({
         {totalIndex >= 0 && (
           <tfoot>
             <tr>
-              <td colSpan={totalIndex + 1} style={{ textAlign: 'right' }}>
+              <td
+                colSpan={totalIndex + 1}
+                className={hiddenBeforeTotal > 0 ? 'no-print' : undefined}
+                style={{ textAlign: 'right' }}
+              >
                 {totalLabel ?? 'Total'}
               </td>
+              {hiddenBeforeTotal > 0 && (
+                <td
+                  colSpan={totalIndex + 1 - hiddenBeforeTotal}
+                  className="print-only-cell"
+                  style={{ textAlign: 'right' }}
+                >
+                  {totalLabel ?? 'Total'}
+                </td>
+              )}
               <td style={{ textAlign: 'center' }}>{total}</td>
               {trailingCols > 0 && <td colSpan={trailingCols} />}
             </tr>

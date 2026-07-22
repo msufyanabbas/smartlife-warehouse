@@ -21,6 +21,7 @@ export enum MicItemStatus {
   PARTIAL = 'Partial',
   PENDING = 'Pending',
   DAMAGED = 'Damaged',
+  DELIVERED = 'Delivered',
 }
 
 export interface MicLineItem {

@@ -30,6 +30,12 @@ export interface LineColumn {
   qtyKey?: string;
   /** Tooltip on the column header. */
   hint?: string;
+  /**
+   * Dropped from the printed document. For working figures that help while the
+   * form is being filled in but have no place on the paper record — what stock
+   * happened to be on hand the day it was typed, say.
+   */
+  hideOnPrint?: boolean;
 }
 
 /**

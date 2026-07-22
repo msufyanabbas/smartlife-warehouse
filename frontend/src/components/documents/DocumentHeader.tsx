@@ -10,7 +10,10 @@ export default function DocumentHeader({ title, subtitle, refLabel, refNumber }:
         <div className="doc-header-brand">
           <img src="/smartlife.png" alt="Smart Life Contracting Company" className="doc-logo" />
           <div>
-            <div className="doc-company">Smart Life Contracting Company</div>
+            <div className="doc-company">
+              <span className="doc-company-name">Smart Life</span>{' '}
+              <span className="doc-company-suffix">Contracting Company</span>
+            </div>
             <div className="doc-company-sub">Warehouse &amp; Inventory Management</div>
           </div>
         </div>

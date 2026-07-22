@@ -32,6 +32,7 @@ const ROW_STATUS_BADGE: Record<MicItemStatus, string> = {
   Installed: 'badge-green',
   Partial: 'badge-yellow',
   Damaged: 'badge-red',
+  Delivered: 'badge-blue',
   Pending: 'badge-gray',
 };
 

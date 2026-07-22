@@ -1,33 +1,63 @@
-@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,300&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700;800;900&display=swap');
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* ── Smart Life brand ─────────────────────────────────────────────────────
+   Dark-first and editorial: near-black navy grounds, purple→magenta→cyan
+   gradient off the S mark, and saturated status colours to match. The
+   gradient is the brand's one loud gesture — it belongs on primary actions,
+   headings and the document title bar, and nowhere else.                    */
 :root {
-  --bg: #0a0b0e;
-  --bg-2: #111318;
-  --bg-3: #181b22;
-  --bg-4: #1e2230;
-  --border: #252a38;
-  --border-light: #2e3448;
-  --text: #e8eaf0;
-  --text-2: #9aa0b8;
-  --text-3: #5c6480;
-  --accent: #4f7cff;
-  --accent-dim: rgba(79,124,255,0.12);
-  --accent-hover: #6b91ff;
-  --green: #22c55e;
-  --green-dim: rgba(34,197,94,0.12);
-  --yellow: #f59e0b;
-  --yellow-dim: rgba(245,158,11,0.12);
-  --red: #ef4444;
-  --red-dim: rgba(239,68,68,0.12);
-  --purple: #a855f7;
-  --purple-dim: rgba(168,85,247,0.12);
+  /* Brand */
+  --brand-primary: #6b2fd9;
+  --brand-secondary: #00c2ff;
+  --brand-gradient: linear-gradient(135deg, #6b2fd9 0%, #c44fd8 50%, #00c2ff 100%);
+  /* The same ramp darkened for gradient-clipped *text*. The cyan end of the
+     gradient above sits at roughly 2:1 on a light background, so headings on
+     white paper or in light mode would fade out mid-word. */
+  --brand-gradient-ink: linear-gradient(135deg, #6b2fd9 0%, #a63fd0 50%, #0077a8 100%);
+
+  /* Surfaces */
+  --bg: #0a0b14;
+  --bg-2: #111220;
+  --bg-3: #1a1b2e;
+  --bg-4: #22233a;
+
+  /* Text */
+  --text: #f0f0ff;
+  --text-2: #a0a3c4;
+  --text-3: #5a5d7a;
+
+  /* Accent */
+  --accent: #7b3fe4;
+  --accent-dim: rgba(123,63,228,0.15);
+  --accent-hover: #8f56f0;
+
+  /* Status — saturated, per the brand's "neon" moodboard */
+  --green: #00e5a0;
+  --green-dim: rgba(0,229,160,0.12);
+  --yellow: #ffb800;
+  --yellow-dim: rgba(255,184,0,0.12);
+  --red: #ff4444;
+  --red-dim: rgba(255,68,68,0.12);
+  --purple: #b44fff;
+  --purple-dim: rgba(180,79,255,0.12);
+  --blue: #00c2ff;
+  --blue-dim: rgba(0,194,255,0.12);
+
+  /* Lines */
+  --border: rgba(123,63,228,0.2);
+  --border-light: rgba(255,255,255,0.06);
+
   --radius: 10px;
+  --radius-md: 12px;
   --radius-lg: 16px;
-  --shadow: 0 4px 24px rgba(0,0,0,0.4);
+  --shadow: 0 4px 24px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.04);
+
+  /* Syne stays the display voice — it is the editorial half of the brand.
+     Inter carries everything else. */
   --font-display: 'Syne', sans-serif;
-  --font-body: 'DM Sans', sans-serif;
+  --font-body: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   --sidebar-w: 240px;
 }
 
@@ -38,7 +68,17 @@ html, body, #root {
   font-family: var(--font-body);
   font-size: 14px;
   line-height: 1.6;
+  font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
   -webkit-font-smoothing: antialiased;
+}
+
+/* Reused wherever the wordmark or a heading carries the brand gradient. */
+.brand-gradient-text {
+  background: var(--brand-gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
 }
 
 /* Scrollbar */
@@ -59,6 +99,12 @@ a { text-decoration: none; color: inherit; }
   width: var(--sidebar-w);
   min-width: var(--sidebar-w);
   background: var(--bg-2);
+  background-image: linear-gradient(
+    180deg,
+    rgba(123,63,228,0.05) 0%,
+    transparent 50%,
+    rgba(0,194,255,0.03) 100%
+  );
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
@@ -75,9 +121,25 @@ a { text-decoration: none; color: inherit; }
 }
 
 .page { padding: 32px; flex: 1; }
-.page-header { margin-bottom: 28px; }
-.page-header h1 { font-family: var(--font-display); font-size: 22px; font-weight: 700; color: var(--text); }
-.page-header p { color: var(--text-2); font-size: 13px; margin-top: 4px; }
+.page-header {
+  margin-bottom: 24px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--border);
+}
+.page-header h1 {
+  font-family: var(--font-display);
+  font-size: 28px;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+  background: var(--brand-gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  /* The gradient paints over the glyphs, so give descenders room to clear. */
+  padding-bottom: 2px;
+}
+.page-header p { color: var(--text-3); font-size: 13px; margin-top: 4px; }
 
 /* Cards */
 .card {
@@ -85,6 +147,7 @@ a { text-decoration: none; color: inherit; }
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   padding: 24px;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.05);
 }
 
 .stat-card {
@@ -95,6 +158,16 @@ a { text-decoration: none; color: inherit; }
   display: flex;
   align-items: flex-start;
   gap: 16px;
+  position: relative;
+  overflow: hidden;
+}
+/* Gradient hairline along the top edge — the brand's signature on every tile. */
+.stat-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: var(--brand-gradient);
 }
 .stat-card .icon-wrap {
   width: 44px; height: 44px;
@@ -123,15 +196,15 @@ thead th {
   padding: 11px 16px;
   text-align: left;
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 700;
   color: var(--text-3);
   text-transform: uppercase;
-  letter-spacing: 0.07em;
+  letter-spacing: 0.08em;
   border-bottom: 1px solid var(--border);
 }
-tbody tr { border-bottom: 1px solid var(--border); transition: background 0.15s; }
+tbody tr { border-bottom: 1px solid var(--border-light); transition: background 0.15s; }
 tbody tr:last-child { border-bottom: none; }
-tbody tr:hover { background: var(--bg-3); }
+tbody tr:hover { background: rgba(123,63,228,0.05); }
 tbody td { padding: 12px 16px; color: var(--text); font-size: 13px; vertical-align: middle; }
 
 /* Buttons */
@@ -139,10 +212,20 @@ tbody td { padding: 12px 16px; color: var(--text); font-size: 13px; vertical-ali
   display: inline-flex; align-items: center; gap: 7px;
   padding: 9px 18px; border-radius: var(--radius);
   font-size: 13px; font-weight: 500;
-  transition: all 0.15s; white-space: nowrap;
+  transition: all 0.2s ease; white-space: nowrap;
 }
-.btn-primary { background: var(--accent); color: #fff; }
-.btn-primary:hover { background: var(--accent-hover); transform: translateY(-1px); }
+.btn-primary {
+  background: var(--brand-gradient);
+  border: none;
+  color: #fff;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  box-shadow: 0 4px 15px rgba(123,63,228,0.4);
+}
+.btn-primary:hover {
+  box-shadow: 0 6px 20px rgba(123,63,228,0.6);
+  transform: translateY(-1px);
+}
 .btn-ghost { background: transparent; color: var(--text-2); border: 1px solid var(--border); }
 .btn-ghost:hover { background: var(--bg-3); color: var(--text); border-color: var(--border-light); }
 .btn-danger { background: var(--red-dim); color: var(--red); border: 1px solid rgba(239,68,68,0.2); }
@@ -156,32 +239,37 @@ tbody td { padding: 12px 16px; color: var(--text); font-size: 13px; vertical-ali
 /* Badges */
 .badge {
   display: inline-flex; align-items: center; gap: 5px;
-  padding: 3px 9px; border-radius: 99px;
-  font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;
+  padding: 3px 9px; border-radius: 6px;
+  font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;
+  border: 1px solid transparent;
 }
-.badge-green { background: var(--green-dim); color: var(--green); }
-.badge-yellow { background: var(--yellow-dim); color: var(--yellow); }
-.badge-red { background: var(--red-dim); color: var(--red); }
-.badge-blue { background: var(--accent-dim); color: var(--accent); }
-.badge-purple { background: var(--purple-dim); color: var(--purple); }
-.badge-gray { background: rgba(255,255,255,0.05); color: var(--text-3); }
+.badge-green { background: var(--green-dim); color: var(--green); border-color: rgba(0,229,160,0.2); }
+.badge-yellow { background: var(--yellow-dim); color: var(--yellow); border-color: rgba(255,184,0,0.2); }
+.badge-red { background: var(--red-dim); color: var(--red); border-color: rgba(255,68,68,0.2); }
+.badge-blue { background: var(--blue-dim); color: var(--blue); border-color: rgba(0,194,255,0.2); }
+.badge-purple { background: var(--purple-dim); color: var(--purple); border-color: rgba(180,79,255,0.2); }
+.badge-gray { background: rgba(255,255,255,0.05); color: var(--text-3); border-color: var(--border-light); }
 
 /* Form elements */
 .form-group { display: flex; flex-direction: column; gap: 6px; }
 .form-label { font-size: 12px; font-weight: 500; color: var(--text-2); }
 .form-input {
-  background: var(--bg-3);
+  background: var(--bg-4);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 9px 12px;
   color: var(--text);
   font-size: 13px;
-  transition: border-color 0.15s;
+  transition: border-color 0.2s, box-shadow 0.2s;
   width: 100%;
 }
-.form-input:focus { outline: none; border-color: var(--accent); }
+.form-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(123,63,228,0.15);
+}
 .form-input::placeholder { color: var(--text-3); }
-select.form-input option { background: var(--bg-3); }
+select.form-input option { background: var(--bg-4); }
 
 /* Modal */
 .modal-overlay {
@@ -192,17 +280,19 @@ select.form-input option { background: var(--bg-3); }
 }
 .modal {
   background: var(--bg-2);
-  border: 1px solid var(--border-light);
+  border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   width: 100%; max-width: 520px;
   max-height: 90vh;
   display: flex; flex-direction: column;
   animation: slideUp 0.2s ease;
-  box-shadow: var(--shadow);
+  box-shadow: 0 25px 80px rgba(0,0,0,0.6), 0 0 0 1px rgba(123,63,228,0.1);
 }
 .modal-header {
   display: flex; align-items: center; justify-content: space-between;
   padding: 20px 24px; border-bottom: 1px solid var(--border);
+  background: var(--bg-3);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
   flex-shrink: 0;
 }
 .modal-header h2 { font-family: var(--font-display); font-size: 16px; font-weight: 700; }
@@ -243,9 +333,14 @@ select.form-input option { background: var(--bg-3); }
 
 .search-bar {
   display: flex; align-items: center; gap: 8px;
-  background: var(--bg-3); border: 1px solid var(--border);
+  background: var(--bg-4); border: 1px solid var(--border);
   border-radius: var(--radius); padding: 8px 12px;
   color: var(--text-2);
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.search-bar:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(123,63,228,0.1);
 }
 .search-bar input { background: transparent; border: none; outline: none; color: var(--text); font-size: 13px; width: 220px; }
 
@@ -257,12 +352,20 @@ select.form-input option { background: var(--bg-3); }
   display: flex; align-items: center; gap: 10px;
   padding: 9px 16px; border-radius: var(--radius);
   margin: 2px 8px; color: var(--text-2);
-  font-size: 13px; font-weight: 500;
+  font-size: 13px; font-weight: 500; letter-spacing: 0.01em;
   transition: all 0.15s; cursor: pointer;
   text-decoration: none;
+  /* Carried by every item, coloured only when active, so selecting one does
+     not shove its label sideways. */
+  border-left: 3px solid transparent;
 }
-.nav-item:hover { background: var(--bg-3); color: var(--text); }
-.nav-item.active { background: var(--accent-dim); color: var(--accent); }
+.nav-item:hover { background: rgba(123,63,228,0.08); color: var(--text); }
+.nav-item.active {
+  background: var(--accent-dim);
+  color: var(--accent);
+  border-left-color: var(--accent);
+  font-weight: 600;
+}
 .nav-item .badge-count {
   margin-left: auto; background: var(--red);
   color: #fff; font-size: 10px; font-weight: 700;
@@ -277,28 +380,34 @@ select.form-input option { background: var(--bg-3); }
 @media (max-width: 768px) { .grid-4, .grid-3, .grid-2 { grid-template-columns: 1fr; } .page { padding: 20px; } }
 
 /* ── Light Mode ─────────────────────────────────────────────────────────── */
+/* Same brand, lit from the other side: a faint purple-tinted paper rather than
+   plain grey. The status colours are deliberately *not* the dark theme's neons —
+   #00e5a0 on near-white is unreadable — so each is dropped to a shade that holds
+   contrast while staying the same hue. */
 [data-theme="light"] {
-  --bg: #f4f5f7;
+  --bg: #f8f7ff;
   --bg-2: #ffffff;
-  --bg-3: #f0f1f4;
-  --bg-4: #e4e6ed;
-  --border: #e0e2ea;
-  --border-light: #cdd0db;
-  --text: #0f1117;
-  --text-2: #4a5066;
-  --text-3: #8b90a8;
-  --accent: #4f7cff;
-  --accent-dim: rgba(79,124,255,0.1);
-  --accent-hover: #3a68f0;
-  --green: #16a34a;
-  --green-dim: rgba(22,163,74,0.1);
-  --yellow: #d97706;
-  --yellow-dim: rgba(217,119,6,0.1);
-  --red: #dc2626;
-  --red-dim: rgba(220,38,38,0.1);
-  --purple: #9333ea;
-  --purple-dim: rgba(147,51,234,0.1);
-  --shadow: 0 4px 24px rgba(0,0,0,0.08);
+  --bg-3: #f0eeff;
+  --bg-4: #e8e4ff;
+  --border: rgba(107,47,217,0.15);
+  --border-light: rgba(107,47,217,0.08);
+  --text: #1a1033;
+  --text-2: #4a4070;
+  --text-3: #8a82a8;
+  --accent: #6b2fd9;
+  --accent-dim: rgba(107,47,217,0.1);
+  --accent-hover: #5a25bd;
+  --green: #00996b;
+  --green-dim: rgba(0,153,107,0.1);
+  --yellow: #b87400;
+  --yellow-dim: rgba(184,116,0,0.1);
+  --red: #d92020;
+  --red-dim: rgba(217,32,32,0.1);
+  --purple: #8b2fd9;
+  --purple-dim: rgba(139,47,217,0.1);
+  --blue: #0077a8;
+  --blue-dim: rgba(0,119,168,0.1);
+  --shadow: 0 4px 24px rgba(26,16,51,0.08);
 }
 
 [data-theme="light"] html,
@@ -313,16 +422,35 @@ select.form-input option { background: var(--bg-3); }
   border-right-color: var(--border);
 }
 
-[data-theme="light"] .modal-backdrop { background: rgba(0,0,0,0.3); }
-[data-theme="light"] .modal { background: var(--bg-2); }
+[data-theme="light"] .modal-backdrop { background: rgba(26,16,51,0.3); }
+[data-theme="light"] .modal {
+  background: var(--bg-2);
+  box-shadow: 0 25px 80px rgba(26,16,51,0.15), 0 0 0 1px rgba(107,47,217,0.08);
+}
 [data-theme="light"] .form-input { background: var(--bg-3); color: var(--text); }
-[data-theme="light"] .form-input:focus { background: var(--bg-2); }
+[data-theme="light"] .form-input:focus { background: var(--bg-2); box-shadow: 0 0 0 3px rgba(107,47,217,0.12); }
 [data-theme="light"] table thead th { background: var(--bg-3); }
+[data-theme="light"] tbody tr:hover { background: rgba(107,47,217,0.04); }
 [data-theme="light"] .search-bar { background: var(--bg-2); }
-[data-theme="light"] .nav-item:hover { background: var(--bg-3); }
+[data-theme="light"] .search-bar:focus-within { box-shadow: 0 0 0 3px rgba(107,47,217,0.1); }
+[data-theme="light"] .nav-item:hover { background: rgba(107,47,217,0.06); }
 [data-theme="light"] .nav-item.active { background: var(--accent-dim); }
 [data-theme="light"] .btn-ghost { border-color: var(--border); color: var(--text-2); }
 [data-theme="light"] .btn-ghost:hover { background: var(--bg-3); }
+[data-theme="light"] .badge-gray { background: rgba(26,16,51,0.05); color: var(--text-3); }
+/* `background-image` rather than the `background` shorthand, which would reset
+   `background-clip` back to border-box and paint over the glyphs. */
+[data-theme="light"] .page-header h1,
+[data-theme="light"] .brand-gradient-text { background-image: var(--brand-gradient-ink); }
+[data-theme="light"] .card { box-shadow: 0 2px 12px rgba(26,16,51,0.06); }
+[data-theme="light"] .sidebar {
+  background-image: linear-gradient(
+    180deg,
+    rgba(107,47,217,0.04) 0%,
+    transparent 50%,
+    rgba(0,194,255,0.03) 100%
+  );
+}
 
 /* ── Theme Toggle ────────────────────────────────────────────────────────── */
 .theme-toggle {
@@ -373,22 +501,39 @@ select.form-input option { background: var(--bg-3); }
   border: 1px solid #e2e5ec; border-radius: 8px; padding: 3px; background: #fff;
 }
 .doc-company { font-family: var(--font-display); font-size: 17px; font-weight: 800; color: #0f172a; line-height: 1.2; }
+/* Always the darker ramp — the document is white paper in both themes. */
+.doc-company-name {
+  background: var(--brand-gradient-ink);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  font-weight: 800;
+}
+.doc-company-suffix { color: #64748b; font-weight: 600; font-size: 13px; }
 .doc-company-sub { font-size: 11px; color: #64748b; letter-spacing: 0.06em; text-transform: uppercase; margin-top: 2px; }
 .doc-header-ref { text-align: right; min-width: 190px; }
 .doc-ref-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: #64748b; }
 .doc-ref-value { font-family: var(--font-display); font-size: 20px; font-weight: 800; color: #b91c1c; letter-spacing: 0.02em; }
 
+/* The brand's one loud gesture on an otherwise sober paper document.
+   `print-color-adjust: exact` keeps the bar from dropping out when the browser
+   strips backgrounds for print — without it the title prints as white on white. */
 .doc-title {
   font-family: var(--font-display);
-  font-size: 22px; font-weight: 800; letter-spacing: 0.14em;
-  text-align: center; color: #0f172a;
-  margin: 16px 0 18px; padding: 8px 0;
-  border-top: 2px solid #0f172a; border-bottom: 2px solid #0f172a;
+  font-size: 18px; font-weight: 800; letter-spacing: 0.15em;
+  text-align: center; color: #fff;
+  text-transform: uppercase;
+  background: var(--brand-gradient);
+  margin: 16px 0 18px; padding: 10px 20px;
+  border: none; border-radius: var(--radius);
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
 }
 .doc-subtitle {
   display: block;
   font-size: 10.5px; font-weight: 600; letter-spacing: 0.18em;
-  color: #475569; margin-top: 5px;
+  color: rgba(255,255,255,0.85); margin-top: 5px;
 }
 
 .doc-field { display: flex; flex-direction: column; gap: 3px; }
@@ -466,11 +611,57 @@ select.form-input option { background: var(--bg-3); }
   font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
 }
 
+/* `.hide-on-print` / `.stock-available-col` are inert until the print block
+   below drops them. `.print-only-cell` is the opposite: the table-footer cell
+   carrying the narrower colSpan the printed table needs. */
+.print-only-cell { display: none; }
+
+/* ── The paper rendering of a document ───────────────────────────────────── */
+/* Rendered alongside the editor and hidden on screen; the Preview toggle and
+   the printer are the two things that reveal it. */
+.print-document {
+  display: none;
+  background: #fff;
+  color: #1a1a3e;
+  font-family: var(--font-body);
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: 30px 34px 24px;
+  border: 1px solid #d5d9e2;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+}
+.print-document.is-preview { display: block; }
+
+/* The navy title bar, the accent stripes and the table head are white text on
+   a dark fill. Browsers strip backgrounds for print by default, which would
+   leave those printing white-on-white — so they opt back in explicitly. */
+.print-doc-ink,
+.print-doc-tint,
+.print-doc-zebra {
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
 /* Print: only the document survives */
 @media print {
   .sidebar, .nav, .no-print { display: none !important; }
+  .hide-on-print, .stock-available-col { display: none !important; }
+  .print-only-cell { display: table-cell !important; }
   .print-doc { width: 100%; }
   body { background: white; }
+
+  /* Gradient-clipped text relies on a painted background. Printers routinely
+     drop those, which would render the heading invisible rather than merely
+     unbranded, so it falls back to solid ink. */
+  .page-header h1,
+  .brand-gradient-text,
+  .doc-company-name {
+    background: none !important;
+    -webkit-text-fill-color: #1a1033 !important;
+    color: #1a1033 !important;
+  }
+  .doc-company-name { -webkit-text-fill-color: #6b2fd9 !important; color: #6b2fd9 !important; }
 
   html, body, #root { height: auto; background: #fff; }
   .app-shell { display: block; height: auto; overflow: visible; }
@@ -484,5 +675,15 @@ select.form-input option { background: var(--bg-3); }
   .doc-table { page-break-inside: auto; }
   .doc-table tr { page-break-inside: avoid; }
   .doc-signatures { page-break-inside: avoid; }
+
+  /* The editor is screen-only; the paper rendering takes its place. */
+  .print-document {
+    display: block !important;
+    max-width: none; margin: 0; padding: 0;
+    border: none; border-radius: 0; box-shadow: none;
+  }
+  .print-document table { page-break-inside: auto; }
+  .print-document tr { page-break-inside: avoid; }
+
   @page { size: A4 portrait; margin: 12mm; }
 }

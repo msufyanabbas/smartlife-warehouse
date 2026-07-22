@@ -72,11 +72,10 @@ export default function Sidebar() {
             />
           </div>
           <div>
-            <div style={{
+            <div className="brand-gradient-text" style={{
               fontFamily: 'var(--font-display)',
-              fontWeight: 700, fontSize: 16,
-              letterSpacing: '-0.02em',
-              color: 'var(--text)',
+              fontWeight: 800, fontSize: 20,
+              letterSpacing: '-0.5px',
             }}>
               StockFlow
             </div>

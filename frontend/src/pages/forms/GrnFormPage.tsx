@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ArrowLeft, FileText, Plus, Printer, Save } from 'lucide-react';
+import { ArrowLeft, Eye, FileText, Plus, Printer, Save } from 'lucide-react';
 import { format } from 'date-fns';
 import toast from 'react-hot-toast';
 import {
@@ -13,7 +13,10 @@ import {
   stripEmptyRows, toLineRows, type LineColumn, type LineRow,
 } from '../../components/documents/lineRows';
 import Field from '../../components/documents/Field';
-import { fullName, orUndefined, toDateInput, today, uniqueSorted } from '../../components/documents/formUtils';
+import PrintDocument, { type PrintColumn } from '../../components/documents/PrintDocument';
+import {
+  fullName, orUndefined, printDate, printSerials, toDateInput, today, uniqueSorted,
+} from '../../components/documents/formUtils';
 import type { GrnDocument, User } from '../../types';
 
 const MIN_ROWS = 15;
@@ -29,6 +32,15 @@ const COLUMNS: LineColumn[] = [
     key: 'serialNumber', label: 'Serial Number(s)', type: 'serial', qtyKey: 'receivedQty',
     width: '18%', hint: 'Serial Number(s) — enter one for the line, or one per unit received',
   },
+];
+
+const PRINT_COLUMNS: PrintColumn[] = [
+  { key: 'itemCode', label: 'Item Code', strong: true },
+  { key: 'itemDescription', label: 'Description' },
+  { key: 'unit', label: 'Unit', align: 'center' },
+  { key: 'orderedQty', label: 'Ordered', align: 'center' },
+  { key: 'receivedQty', label: 'Received', align: 'center', strong: true },
+  { key: 'serialNumber', label: 'Serial Number(s)', render: row => printSerials(row.serialNumber) },
 ];
 
 export default function GrnFormPage() {
@@ -187,9 +199,15 @@ function GrnEditor({ id, doc, onClose, onCreated }: {
 
   const [form, setForm] = useState<FormState>(() => toFormState(doc));
   const [rows, setRows] = useState<LineRow[]>(() => toLineRows(doc?.items, MIN_ROWS, ROW_DEFAULTS));
+  const [preview, setPreview] = useState(false);
 
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) =>
     setForm(prev => ({ ...prev, [key]: value }));
+
+  const nameOf = (id: string) => {
+    const match = (users as User[]).find(u => u.id === id);
+    return match ? fullName(match) : '';
+  };
 
   const schemes = uniqueSorted((inventory as any[]).map(i => i.schemeNo));
   const projects = uniqueSorted((inventory as any[]).map(i => i.projectName));
@@ -235,6 +253,9 @@ function GrnEditor({ id, doc, onClose, onCreated }: {
         </button>
         <div className="flex gap-2 items-center">
           <DocumentStatusBadge status={form.status} />
+          <button className="btn btn-ghost btn-sm" onClick={() => setPreview(p => !p)}>
+            <Eye size={14} /> {preview ? 'Edit' : 'Preview'}
+          </button>
           <button className="btn btn-ghost btn-sm" onClick={() => window.print()} disabled={!id}>
             <Printer size={14} /> Print
           </button>
@@ -247,7 +268,7 @@ function GrnEditor({ id, doc, onClose, onCreated }: {
         </div>
       </div>
 
-      <div className="doc-paper print-doc">
+      <div className="doc-paper no-print" style={preview ? { display: 'none' } : undefined}>
         <DocumentHeader title="STOCK RECEIVING" refLabel="GRN No." refNumber={doc?.grnNo} />
 
         <div className="doc-grid">
@@ -329,6 +350,30 @@ function GrnEditor({ id, doc, onClose, onCreated }: {
 
         <SignatureFooter labels={['Store Keeper', 'Warehouse Manager']} />
       </div>
+
+      <PrintDocument
+        preview={preview}
+        docLabel="GRN No."
+        docNumber={doc?.grnNo}
+        title="Stock Receiving"
+        fields={[
+          { label: 'Supplier Name', value: form.supplierName },
+          { label: 'Purchase Order No.', value: form.purchaseOrderNo },
+          { label: 'Date of Receipt', value: printDate(form.dateOfReceipt) },
+          { label: 'Delivery Note No.', value: form.deliveryNoteNo },
+          { label: 'Warehouse / Location', value: form.location },
+          { label: 'Received By', value: nameOf(form.receivedById) },
+          { label: 'Project Name', value: form.projectName },
+          { label: 'Scheme Number', value: form.schemeNo },
+          { label: 'Condition on Arrival', value: form.conditionOnArrival },
+        ]}
+        columns={PRINT_COLUMNS}
+        rows={rows}
+        totalKey="receivedQty"
+        totalLabel="Total Quantity Received"
+        notes={{ label: 'Notes / Remarks', value: form.notes }}
+        signatures={['Store Keeper', 'Warehouse Manager']}
+      />
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import {
-  AlertCircle, ArrowLeft, Check, ClipboardCheck, Plus, Printer, Save, X,
+  AlertCircle, ArrowLeft, Check, ClipboardCheck, Eye, Plus, Printer, Save, X,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import toast from 'react-hot-toast';
@@ -18,11 +18,14 @@ import {
   stripEmptyRows, toLineRows, type LineColumn, type LineRow,
 } from '../../components/documents/lineRows';
 import Field from '../../components/documents/Field';
-import { fullName, orUndefined, toDateInput, today, uniqueSorted } from '../../components/documents/formUtils';
+import PrintDocument, { type PrintColumn } from '../../components/documents/PrintDocument';
+import {
+  fullName, orUndefined, printDate, printSerials, toDateInput, today, uniqueSorted,
+} from '../../components/documents/formUtils';
 import type { AssignmentForm, MicDocument, MicStatus, User } from '../../types';
 
 const MIN_ROWS = 15;
-const ITEM_STATUSES = ['Installed', 'Partial', 'Pending', 'Damaged'];
+const ITEM_STATUSES = ['Installed', 'Partial', 'Pending', 'Damaged', 'Delivered'];
 const ROW_DEFAULTS = {
   qtyReceived: 0, qtyInstalled: 0, serialNumbers: '',
   installDate: today(), status: 'Pending',
@@ -54,6 +57,17 @@ const COLUMNS: LineColumn[] = [
   },
   { key: 'installDate', label: 'Install Date', type: 'date', width: '12%' },
   { key: 'status', label: 'Status', type: 'select', options: ITEM_STATUSES, width: '11%' },
+];
+
+const PRINT_COLUMNS: PrintColumn[] = [
+  { key: 'itemCode', label: 'Item Code', strong: true },
+  { key: 'itemDescription', label: 'Description' },
+  { key: 'unit', label: 'Unit', align: 'center' },
+  { key: 'qtyReceived', label: 'Qty Received', align: 'center' },
+  { key: 'qtyInstalled', label: 'Qty Installed', align: 'center', strong: true },
+  { key: 'serialNumbers', label: 'Serial Number(s)', render: row => printSerials(row.serialNumbers) },
+  { key: 'installDate', label: 'Install Date', render: row => printDate(row.installDate as string) },
+  { key: 'status', label: 'Status', align: 'center' },
 ];
 
 /** What an item was issued on, and how much of it — keyed by inventory item id. */
@@ -277,6 +291,7 @@ function MicEditor({ id, doc, onClose, onCreated }: {
   const [verdict, setVerdict] = useState<Verdict | undefined>(() => toVerdict(doc));
   const [rejecting, setRejecting] = useState(false);
   const [rejectionReason, setRejectionReason] = useState('');
+  const [preview, setPreview] = useState(false);
 
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) =>
     setForm(prev => ({ ...prev, [key]: value }));
@@ -290,6 +305,7 @@ function MicEditor({ id, doc, onClose, onCreated }: {
   const departments = uniqueSorted(forms.map(f => f.department));
   // Set on the server from the token, so a new document shows whoever is filling it in.
   const installedBy = doc?.installedBy ?? (user ?? undefined);
+  const verifiedByName = fullName((approvers as User[]).find(u => u.id === form.verifiedById));
 
   // A manager may raise the form for any issued stock; a worker only for their own.
   const issued = issuedItems(forms, isManager ? undefined : user?.id);
@@ -362,6 +378,9 @@ function MicEditor({ id, doc, onClose, onCreated }: {
         </button>
         <div className="flex gap-2 items-center">
           <DocumentStatusBadge status={form.status} />
+          <button className="btn btn-ghost btn-sm" onClick={() => setPreview(p => !p)}>
+            <Eye size={14} /> {preview ? 'Edit' : 'Preview'}
+          </button>
           <button className="btn btn-ghost btn-sm" onClick={() => window.print()} disabled={!id}>
             <Printer size={14} /> Print
           </button>
@@ -400,7 +419,7 @@ function MicEditor({ id, doc, onClose, onCreated }: {
         </div>
       )}
 
-      <div className="doc-paper print-doc">
+      <div className="doc-paper no-print" style={preview ? { display: 'none' } : undefined}>
         <DocumentHeader
           title="MATERIAL INSTALLATION CONFIRMATION"
           subtitle="SITE INSTALLATION & MATERIAL TRACKING"
@@ -512,6 +531,29 @@ function MicEditor({ id, doc, onClose, onCreated }: {
           labels={['Installed By (Worker)', 'Verified By (Site Supervisor)', 'Approved By (Warehouse / Store)']}
         />
       </div>
+
+      <PrintDocument
+        preview={preview}
+        docLabel="Installation No."
+        docNumber={doc?.micNo}
+        title="Material Installation Confirmation"
+        fields={[
+          { label: 'Installation No.', value: doc?.micNo },
+          { label: 'Date', value: printDate(form.date) },
+          { label: 'Site ID', value: form.siteId },
+          { label: 'Project / Client', value: form.projectClient },
+          { label: 'Installed By', value: fullName(installedBy) },
+          { label: 'Verified By', value: verifiedByName },
+          { label: 'Install Department', value: form.installDepartment },
+          { label: 'Linked Assignment (ASN)', value: linkedAsnNo },
+        ]}
+        purpose={{ label: 'Purpose / Description', value: form.purposeDescription }}
+        columns={PRINT_COLUMNS}
+        rows={rows}
+        totalKey="qtyInstalled"
+        totalLabel="Total Quantity Installed"
+        signatures={['Installed By', 'Verified By', 'Approved By']}
+      />
 
       <Modal
         isOpen={rejecting}

@@ -15,8 +15,7 @@ import DocumentStatusBadge from '../../components/documents/DocumentStatusBadge'
 import SignatureFooter from '../../components/documents/SignatureFooter';
 import LineItemsTable from '../../components/documents/LineItemsTable';
 import {
-  splitSerials, stripEmptyRows, toLineRows,
-  type LineColumn, type LineRow,
+  stripEmptyRows, toLineRows, type LineColumn, type LineRow,
 } from '../../components/documents/lineRows';
 import Field from '../../components/documents/Field';
 import { fullName, orUndefined, toDateInput, today, uniqueSorted } from '../../components/documents/formUtils';
@@ -35,12 +34,12 @@ const COLUMNS: LineColumn[] = [
   { key: 'unit', label: 'Unit', width: '7%' },
   {
     key: 'qtyReceived', label: 'Qty Received', type: 'readonly', width: '9%',
-    hint: 'Quantity issued on the linked assignment form',
+    hint: 'Quantity issued to you on an assignment form (ASN)',
   },
   {
     key: 'qtyInstalled', label: 'Qty Installed', type: 'number', width: '9%',
-    // A line pre-filled from an assignment cannot install more than was issued;
-    // a hand-entered line carries no received figure and stays uncapped.
+    // A line picked from stock cannot install more than was issued; a
+    // hand-typed code carries no received figure and stays uncapped.
     max: row => (Number(row.qtyReceived) > 0 ? Number(row.qtyReceived) : undefined),
     warn: row => {
       const received = Number(row.qtyReceived) || 0;
@@ -51,11 +50,45 @@ const COLUMNS: LineColumn[] = [
   },
   {
     key: 'serialNumbers', label: 'Serial Number(s)', type: 'serial', qtyKey: 'qtyInstalled',
-    width: '16%', hint: 'Serial Number(s) — enter one for the line, or one per unit installed',
+    width: '16%', hint: 'Auto-filled from the stock item — edit, or give one serial per unit installed',
   },
   { key: 'installDate', label: 'Install Date', type: 'date', width: '12%' },
   { key: 'status', label: 'Status', type: 'select', options: ITEM_STATUSES, width: '11%' },
 ];
+
+/** What an item was issued on, and how much of it — keyed by inventory item id. */
+interface IssuedEntry {
+  qty: number;
+  asnNos: string[];
+}
+
+/**
+ * Reads the issued assignment forms back into a per-item view. A worker may only
+ * confirm what was booked out to them; a manager raising the form on someone's
+ * behalf sees everything that has been issued to anyone. Either way an item that
+ * was never issued cannot be installed, so it is not offered.
+ */
+function issuedItems(forms: AssignmentForm[], onlyFor?: string): Map<string, IssuedEntry> {
+  const byItem = new Map<string, IssuedEntry>();
+
+  for (const form of forms) {
+    if (form.status !== 'issued') continue;
+    if (onlyFor && form.assignedToId !== onlyFor) continue;
+
+    for (const line of form.items ?? []) {
+      if (!line.itemId || !(line.qtyIssued > 0)) continue;
+
+      const entry = byItem.get(line.itemId) ?? { qty: 0, asnNos: [] };
+      entry.qty += line.qtyIssued;
+      if (form.assignmentNo && !entry.asnNos.includes(form.assignmentNo)) {
+        entry.asnNos.push(form.assignmentNo);
+      }
+      byItem.set(line.itemId, entry);
+    }
+  }
+
+  return byItem;
+}
 
 export default function MicFormPage() {
   const [openId, setOpenId] = useState<string | null>(null);
@@ -128,11 +161,11 @@ function MicList({ onNew, onOpen }: { onNew: () => void; onOpen: (id: string) =>
           <table>
             <thead>
               <tr>
-                <th>MIC No.</th>
+                <th>Installation No.</th>
                 <th>Date</th>
                 <th>Site ID</th>
                 <th>Project / Client</th>
-                <th>Assignment No.</th>
+                <th>Linked ASN</th>
                 <th>Installed By</th>
                 <th style={{ textAlign: 'center' }}>Items</th>
                 <th style={{ textAlign: 'center' }}>Total Installed</th>
@@ -148,7 +181,7 @@ function MicList({ onNew, onOpen }: { onNew: () => void; onOpen: (id: string) =>
                     <td>{doc.date ? format(new Date(doc.date), 'dd MMM yyyy') : '—'}</td>
                     <td>{doc.siteId || '—'}</td>
                     <td style={{ color: 'var(--text-2)' }}>{doc.projectClient || '—'}</td>
-                    <td style={{ color: 'var(--text-2)' }}>{doc.assignmentNo || '—'}</td>
+                    <td style={{ color: 'var(--text-2)' }}>{doc.linkedAsnNo || '—'}</td>
                     <td style={{ color: 'var(--text-2)' }}>{fullName(doc.installedBy)}</td>
                     <td style={{ textAlign: 'center' }}>{doc.items.length}</td>
                     <td style={{ textAlign: 'center', fontWeight: 700 }}>{totalInstalled}</td>
@@ -166,7 +199,6 @@ function MicList({ onNew, onOpen }: { onNew: () => void; onOpen: (id: string) =>
 
 // ── Document view ──────────────────────────────────────────────────────────
 interface FormState {
-  assignmentNo: string;
   date: string;
   siteId: string;
   projectClient: string;
@@ -177,12 +209,11 @@ interface FormState {
 }
 
 const BLANK: FormState = {
-  assignmentNo: '', date: today(), siteId: '', projectClient: '',
+  date: today(), siteId: '', projectClient: '',
   installDepartment: '', verifiedById: '', purposeDescription: '', status: 'draft',
 };
 
 const toFormState = (doc?: MicDocument): FormState => doc ? {
-  assignmentNo: doc.assignmentNo ?? '',
   date: toDateInput(doc.date),
   siteId: doc.siteId ?? '',
   projectClient: doc.projectClient ?? '',
@@ -226,6 +257,8 @@ const toVerdict = (doc?: MicDocument): Verdict | undefined =>
     ? { by: doc.approvedBy, reason: doc.rejectionReason }
     : undefined;
 
+const READ_ONLY_INPUT = { background: 'var(--bg-3)', cursor: 'not-allowed' } as const;
+
 function MicEditor({ id, doc, onClose, onCreated }: {
   id?: string;
   doc?: MicDocument;
@@ -258,46 +291,15 @@ function MicEditor({ id, doc, onClose, onCreated }: {
   // Set on the server from the token, so a new document shows whoever is filling it in.
   const installedBy = doc?.installedBy ?? (user ?? undefined);
 
-  /**
-   * The MIC confirms what an assignment put on site, so picking the ASN carries
-   * its lines across: codes, units and the issued quantity become the "received"
-   * figure to install against. Only the installed quantities are left to fill in.
-   */
-  const applyAssignment = (assignmentNo: string) => {
-    set('assignmentNo', assignmentNo);
+  // A manager may raise the form for any issued stock; a worker only for their own.
+  const issued = issuedItems(forms, isManager ? undefined : user?.id);
 
-    const source = forms.find(f => f.assignmentNo === assignmentNo);
-    if (!source) return;
-
-    const filled = rows.some(row => row.itemCode.trim() || row.itemDescription.trim());
-    if (filled && !window.confirm('Replace the current line items with the items from this assignment?')) {
-      return;
-    }
-
-    const prefilled = (source.items ?? []).map(line => ({
-      itemId: line.itemId,
-      itemCode: line.itemCode,
-      itemDescription: line.itemDescription,
-      unit: line.unit,
-      qtyReceived: line.qtyIssued || 0,
-      qtyInstalled: 0,
-      serialNumbers: splitSerials(line.serialNumber).join(', '),
-      installDate: today(),
-      status: 'Pending',
-    }));
-
-    setRows(toLineRows(prefilled, MIN_ROWS, ROW_DEFAULTS));
-
-    // The assignment already knows where its items went; don't make the worker
-    // retype it, but never overwrite something they have already entered.
-    setForm(prev => ({
-      ...prev,
-      assignmentNo,
-      siteId: prev.siteId || source.projectSite || '',
-      projectClient: prev.projectClient || source.projectSite || '',
-      installDepartment: prev.installDepartment || source.department || '',
-    }));
-  };
+  // The ASN link falls out of the items that were picked. Until something is
+  // picked, a saved document keeps showing whatever it was filed against.
+  const derivedAsnNo = uniqueSorted(
+    rows.flatMap(row => (row.itemId ? issued.get(row.itemId)?.asnNos ?? [] : [])),
+  ).join(', ');
+  const linkedAsnNo = derivedAsnNo || doc?.linkedAsnNo || '';
 
   const save = async (status: Extract<MicStatus, 'draft' | 'pending_approval'>) => {
     const items = stripEmptyRows(rows).map(row => ({
@@ -320,6 +322,7 @@ function MicEditor({ id, doc, onClose, onCreated }: {
     const payload = {
       ...form,
       status,
+      linkedAsnNo: orUndefined(linkedAsnNo),
       date: orUndefined(form.date),
       verifiedById: orUndefined(form.verifiedById),
       items,
@@ -406,16 +409,14 @@ function MicEditor({ id, doc, onClose, onCreated }: {
         />
 
         <div className="doc-grid">
-          <Field label="Assignment No.">
-            <select className="doc-input" value={form.assignmentNo} disabled={!canEdit}
-              onChange={e => applyAssignment(e.target.value)}>
-              <option value="">— Select —</option>
-              {forms.map(f => (
-                <option key={f.id} value={f.assignmentNo}>
-                  {f.assignmentNo}{f.projectSite ? ` · ${f.projectSite}` : ''}
-                </option>
-              ))}
-            </select>
+          <Field label="Installation No.">
+            <input
+              className="doc-input"
+              value={doc?.micNo ?? 'Auto-generated on save'}
+              readOnly
+              title="Generated when the form is first saved"
+              style={READ_ONLY_INPUT}
+            />
           </Field>
           <Field label="Date">
             <input type="date" className="doc-input" value={form.date} disabled={!canEdit}
@@ -443,7 +444,7 @@ function MicEditor({ id, doc, onClose, onCreated }: {
               value={fullName(installedBy)}
               readOnly
               title="Taken from the signed-in user"
-              style={{ background: 'var(--bg-3)', cursor: 'not-allowed' }}
+              style={READ_ONLY_INPUT}
             />
           </Field>
 
@@ -455,6 +456,15 @@ function MicEditor({ id, doc, onClose, onCreated }: {
                 <option key={u.id} value={u.id}>{fullName(u)} ({u.role})</option>
               ))}
             </select>
+          </Field>
+          <Field label="Linked Assignment (ASN)">
+            <input
+              className="doc-input"
+              value={linkedAsnNo || '—'}
+              readOnly
+              title="Taken from the assignment the picked items were issued on"
+              style={READ_ONLY_INPUT}
+            />
           </Field>
         </div>
 
@@ -475,6 +485,11 @@ function MicEditor({ id, doc, onClose, onCreated }: {
           newRowDefaults={ROW_DEFAULTS}
           totalKey="qtyInstalled"
           totalLabel="Total Quantity Installed"
+          // Only issued stock is offered, and picking it fills in how much was
+          // issued and the serial the warehouse recorded against it.
+          stockField="qtyReceived"
+          serialField="serialNumbers"
+          resolveStock={item => issued.get(item.id)?.qty ?? 0}
         />
 
         {verdict && (

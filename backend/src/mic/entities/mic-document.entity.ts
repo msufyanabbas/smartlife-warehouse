@@ -45,9 +45,13 @@ export class MicDocument {
   @Column({ unique: true })
   micNo: string;
 
-  /** The ASN whose items this confirms, held by reference rather than by id. */
+  /**
+   * The ASN(s) the installed items were issued on. Derived from the items the
+   * worker picks rather than chosen up front — the assignment is a fact about
+   * where the stock came from, not something to be typed in.
+   */
   @Column({ nullable: true })
-  assignmentNo: string;
+  linkedAsnNo: string;
 
   @Column({ type: 'date', nullable: true })
   date: string;

@@ -19,7 +19,9 @@ interface StockItem {
 }
 
 // ── Item code autocomplete ─────────────────────────────────────────────────
-function ItemCodePicker({ row, source, filterStock, onPick, readOnly, usedIds, stockField, resolveStock }: {
+function ItemCodePicker({
+  row, source, filterStock, onPick, readOnly, usedIds, stockField, serialField, resolveStock,
+}: {
   row: LineRow;
   source: 'products' | 'inventory';
   filterStock?: (item: StockItem) => boolean;
@@ -27,6 +29,7 @@ function ItemCodePicker({ row, source, filterStock, onPick, readOnly, usedIds, s
   readOnly?: boolean;
   usedIds: string[];
   stockField?: string;
+  serialField: string;
   resolveStock?: (item: StockItem) => number;
 }) {
   // A form can supply its own on-hand figure (the document-derived one, say);
@@ -66,9 +69,10 @@ function ItemCodePicker({ row, source, filterStock, onPick, readOnly, usedIds, s
     });
   };
 
-  // Each document names the on-hand figure differently (`stockAvailable` on an
-  // assignment, `stockQty` on a transfer) and the backend rejects any field its
-  // DTO does not declare, so write only the key this form actually asked for.
+  // Each document names these fields differently (`stockAvailable` on an
+  // assignment, `stockQty` on a transfer, `serialNumbers` on a MIC) and the
+  // backend rejects any field its DTO does not declare, so write only the keys
+  // this form actually asked for.
   const pickStock = (i: StockItem) => {
     setQuery(i.sku);
     setOpen(false);
@@ -77,7 +81,7 @@ function ItemCodePicker({ row, source, filterStock, onPick, readOnly, usedIds, s
       itemCode: i.sku,
       itemDescription: i.name,
       unit: i.product?.unit || '',
-      serialNumber: i.serialNumber || '',
+      [serialField]: i.serialNumber || '',
       ...(stockField ? { [stockField]: stockOf(i) } : {}),
     });
   };
@@ -87,7 +91,8 @@ function ItemCodePicker({ row, source, filterStock, onPick, readOnly, usedIds, s
     setOpen(false);
     onPick({
       productId: undefined, itemId: undefined,
-      itemCode: '', itemDescription: '', unit: '', serialNumber: '',
+      itemCode: '', itemDescription: '', unit: '',
+      [serialField]: '',
       ...(stockField ? { [stockField]: 0 } : {}),
     });
   };
@@ -186,7 +191,7 @@ const optionMeta: React.CSSProperties = {
 export default function LineItemsTable({
   rows, onChange, columns, source, filterStock,
   minRows = 15, readOnly = false, totalKey, totalLabel,
-  newRowDefaults = {}, stockField, resolveStock,
+  newRowDefaults = {}, stockField, serialField = 'serialNumber', resolveStock,
 }: {
   rows: LineRow[];
   onChange: (rows: LineRow[]) => void;
@@ -200,6 +205,8 @@ export default function LineItemsTable({
   newRowDefaults?: Record<string, any>;
   /** Row key the picked item's on-hand quantity is written to, if the form shows one. */
   stockField?: string;
+  /** Row key the picked item's serial is written to. Defaults to `serialNumber`. */
+  serialField?: string;
   /** Overrides where a picked item's on-hand quantity is read from. Defaults to the inventory row. */
   resolveStock?: (item: StockItem) => number;
 }) {
@@ -251,6 +258,7 @@ export default function LineItemsTable({
                       readOnly={readOnly}
                       usedIds={usedIds}
                       stockField={stockField}
+                      serialField={serialField}
                       resolveStock={resolveStock}
                       onPick={patch => patchRow(index, patch)}
                     />

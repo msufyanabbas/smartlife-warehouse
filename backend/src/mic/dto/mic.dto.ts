@@ -41,7 +41,7 @@ export class MicItemDto {
 
 export class CreateMicDto {
   @IsOptional() @IsString()
-  assignmentNo?: string;
+  linkedAsnNo?: string;
 
   @IsOptional() @IsDateString()
   date?: string;

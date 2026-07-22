@@ -224,7 +224,8 @@ export type MicStatus = 'draft' | 'pending_approval' | 'approved' | 'rejected';
 export interface MicDocument {
   id: string;
   micNo: string;
-  assignmentNo?: string;
+  /** ASN reference(s) the installed items were issued on — derived, not entered. */
+  linkedAsnNo?: string;
   date?: string;
   siteId?: string;
   projectClient?: string;

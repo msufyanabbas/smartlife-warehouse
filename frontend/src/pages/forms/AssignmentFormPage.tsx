@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ArrowLeft, ClipboardList, Eye, Plus, Printer, Save } from 'lucide-react';
+import { AlertCircle, ArrowLeft, ClipboardList, Eye, Plus, Printer, Save } from 'lucide-react';
 import { format } from 'date-fns';
 import toast from 'react-hot-toast';
 import {
@@ -328,6 +328,21 @@ function AssignmentEditor({ id, doc, onClose, onCreated }: {
           refNumber={doc?.assignmentNo}
         />
 
+        {alreadyIssued && (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            background: 'rgba(245,158,11,0.08)',
+            border: '1px solid rgba(245,158,11,0.3)',
+            borderRadius: 'var(--radius)', padding: '10px 14px', marginBottom: 16,
+          }}>
+            <AlertCircle size={16} color="#f59e0b" style={{ flexShrink: 0 }} />
+            <span style={{ fontSize: 13, color: '#b45309', fontWeight: 500 }}>
+              This form has already been issued. Quantities are locked, but you can correct the
+              Assigned To / Requested By details and click Save.
+            </span>
+          </div>
+        )}
+
         <div className="doc-grid">
           <Field label="Date">
             <input type="date" className="doc-input" value={form.date}
@@ -387,6 +402,7 @@ function AssignmentEditor({ id, doc, onClose, onCreated }: {
           newRowDefaults={ROW_DEFAULTS}
           totalKey="qtyIssued"
           totalLabel="Total Quantity Assigned"
+          readOnly={alreadyIssued}
         />
 
         <div style={{ marginTop: 18 }}>

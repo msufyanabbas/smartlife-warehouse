@@ -14,6 +14,7 @@ import {
 import { Assignment, AssignmentStatus } from '../assignments/entities/assignment.entity';
 import { InventoryItem } from '../inventory/entities/inventory-item.entity';
 import { InventoryService } from '../inventory/inventory.service';
+import { User } from '../users/entities/user.entity';
 import { generateRefNumber } from '../common/utils/generate-ref-number';
 import { joinSerials } from '../common/utils/serial-numbers';
 
@@ -61,9 +62,26 @@ export class AssignmentFormsService {
     // Captured before the merge — inventory must be deducted exactly once, on
     // the transition into `issued`, not on every save of an already-issued form.
     const wasIssued = doc.status === AssignmentFormStatus.ISSUED;
+    // Captured before the merge so we can tell whether the recipient actually
+    // changed, and follow the correction through to the assignment rows below.
+    const prevAssignedToId = doc.assignedToId;
+    const prevRequestedById = doc.requestedById;
 
     Object.assign(doc, dto);
     if (dto.items) doc.items = normalizeItems(dto.items);
+
+    // `assignedTo`/`requestedBy` are eager relations, so `doc` was loaded with the
+    // old User objects attached. Object.assign only touched the FK columns; on save
+    // TypeORM derives each FK from the still-attached relation object and silently
+    // writes the old id back — which is exactly why changing the recipient on an
+    // already-issued form never stuck. Re-point the relation at the new id (or clear
+    // it) so the FK we were asked to persist is the one that survives the save.
+    if (doc.assignedToId !== prevAssignedToId) {
+      doc.assignedTo = (doc.assignedToId ? { id: doc.assignedToId } : null) as User;
+    }
+    if (doc.requestedById !== prevRequestedById) {
+      doc.requestedBy = (doc.requestedById ? { id: doc.requestedById } : null) as User;
+    }
 
     // Checked before the save: a form that persists as `issued` without opening
     // any assignment is the thing that makes the stock report read zero.
@@ -73,6 +91,18 @@ export class AssignmentFormsService {
     if (!wasIssued && saved.status === AssignmentFormStatus.ISSUED) {
       await this.issueItems(saved);
     }
+
+    // Correcting the recipient on an already-issued form has to follow through to
+    // the assignment rows opened when it was issued: the Assigned & Used report
+    // reads the recipient from those rows, not from the form, so leaving them on
+    // the old worker would keep showing the mistake after the form itself is fixed.
+    if (wasIssued && saved.assignedToId && saved.assignedToId !== prevAssignedToId) {
+      await this.assignmentRepository.update(
+        { assignmentFormId: id },
+        { assignedToId: saved.assignedToId },
+      );
+    }
+
     return saved;
   }
 

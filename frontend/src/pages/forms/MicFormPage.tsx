@@ -29,10 +29,6 @@ const ITEM_STATUSES = ['Installed', 'Partial', 'Pending', 'Damaged', 'Delivered'
 const ROW_DEFAULTS = {
   qtyReceived: 0, qtyInstalled: 0, serialNumbers: '',
   installDate: today(), status: 'Pending',
-  // Which ASN this particular line was taken from. Stamped when the item is
-  // picked, because it cannot be recovered afterwards: the same SKU may have
-  // been issued on any number of forms, and the row only remembers the item.
-  sourceAsnNo: '',
 };
 
 const COLUMNS: LineColumn[] = [
@@ -74,10 +70,9 @@ const PRINT_COLUMNS: PrintColumn[] = [
   { key: 'status', label: 'Status', align: 'center' },
 ];
 
-/** What an item was issued on, and how much of it — keyed by inventory item id. */
+/** How much of an item was issued — keyed by inventory item id. */
 interface IssuedEntry {
   qty: number;
-  asnNos: string[];
 }
 
 /**
@@ -96,11 +91,8 @@ function issuedItems(forms: AssignmentForm[], onlyFor?: string): Map<string, Iss
     for (const line of form.items ?? []) {
       if (!line.itemId || !(line.qtyIssued > 0)) continue;
 
-      const entry = byItem.get(line.itemId) ?? { qty: 0, asnNos: [] };
+      const entry = byItem.get(line.itemId) ?? { qty: 0 };
       entry.qty += line.qtyIssued;
-      if (form.assignmentNo && !entry.asnNos.includes(form.assignmentNo)) {
-        entry.asnNos.push(form.assignmentNo);
-      }
       byItem.set(line.itemId, entry);
     }
   }
@@ -183,7 +175,6 @@ function MicList({ onNew, onOpen }: { onNew: () => void; onOpen: (id: string) =>
                 <th>Date</th>
                 <th>Site ID</th>
                 <th>Project / Client</th>
-                <th>Linked ASN</th>
                 <th>Installed By</th>
                 <th style={{ textAlign: 'center' }}>Items</th>
                 <th style={{ textAlign: 'center' }}>Total Installed</th>
@@ -199,7 +190,6 @@ function MicList({ onNew, onOpen }: { onNew: () => void; onOpen: (id: string) =>
                     <td>{doc.date ? format(new Date(doc.date), 'dd MMM yyyy') : '—'}</td>
                     <td>{doc.siteId || '—'}</td>
                     <td style={{ color: 'var(--text-2)' }}>{doc.projectClient || '—'}</td>
-                    <td style={{ color: 'var(--text-2)' }}>{doc.linkedAsnNo || '—'}</td>
                     <td style={{ color: 'var(--text-2)' }}>{fullName(doc.installedBy)}</td>
                     <td style={{ textAlign: 'center' }}>{doc.items.length}</td>
                     <td style={{ textAlign: 'center', fontWeight: 700 }}>{totalInstalled}</td>
@@ -314,41 +304,6 @@ function MicEditor({ id, doc, onClose, onCreated }: {
   // A manager may raise the form for any issued stock; a worker only for their own.
   const issued = issuedItems(forms, isManager ? undefined : user?.id);
 
-  /**
-   * Stamps each line with the assignment it was actually taken from.
-   *
-   * Reading the link back off the item id instead would name *every* form that
-   * ever issued that SKU — pick one Current Transformer and the document claims
-   * all five assignments that shipped one. The choice only exists at the moment
-   * of picking, so it is recorded there and carried on the row.
-   *
-   * Rows are matched by `_key` rather than index: removing a row shifts every
-   * row below it, and an index comparison would read those as newly picked.
-   */
-  const handleRowsChange = (next: LineRow[]) => {
-    setRows(previous => {
-      const byKey = new Map(previous.map(row => [row._key, row]));
-      return next.map(row => {
-        const before = byKey.get(row._key);
-        if (before && row.itemId === before.itemId) return row;
-        return {
-          ...row,
-          sourceAsnNo: row.itemId ? issued.get(row.itemId)?.asnNos[0] ?? '' : '',
-        };
-      });
-    });
-  };
-
-  // Built from what those lines recorded, so it names only the assignments this
-  // document actually draws on. A saved document with nothing picked yet keeps
-  // showing whatever it was filed against.
-  const derivedAsnNo = uniqueSorted(
-    rows
-      .filter(row => row.itemCode?.trim())
-      .map(row => row.sourceAsnNo as string | undefined),
-  ).join(', ');
-  const linkedAsnNo = derivedAsnNo || doc?.linkedAsnNo || '';
-
   const save = async (status: Extract<MicStatus, 'draft' | 'pending_approval'>) => {
     const items = stripEmptyRows(rows).map(row => ({
       itemId: row.itemId,
@@ -370,7 +325,6 @@ function MicEditor({ id, doc, onClose, onCreated }: {
     const payload = {
       ...form,
       status,
-      linkedAsnNo: orUndefined(linkedAsnNo),
       date: orUndefined(form.date),
       verifiedById: orUndefined(form.verifiedById),
       items,
@@ -508,15 +462,6 @@ function MicEditor({ id, doc, onClose, onCreated }: {
               ))}
             </select>
           </Field>
-          <Field label="Linked Assignment (ASN)">
-            <input
-              className="doc-input"
-              value={linkedAsnNo || '—'}
-              readOnly
-              title="Taken from the assignment the picked items were issued on"
-              style={READ_ONLY_INPUT}
-            />
-          </Field>
         </div>
 
         <div style={{ marginBottom: 18 }}>
@@ -528,7 +473,7 @@ function MicEditor({ id, doc, onClose, onCreated }: {
 
         <LineItemsTable
           rows={rows}
-          onChange={handleRowsChange}
+          onChange={setRows}
           columns={COLUMNS}
           source="inventory"
           minRows={MIN_ROWS}
@@ -577,7 +522,6 @@ function MicEditor({ id, doc, onClose, onCreated }: {
           { label: 'Installed By', value: fullName(installedBy) },
           { label: 'Verified By', value: verifiedByName },
           { label: 'Install Department', value: form.installDepartment },
-          { label: 'Linked Assignment (ASN)', value: linkedAsnNo },
         ]}
         purpose={{ label: 'Purpose / Description', value: form.purposeDescription }}
         columns={PRINT_COLUMNS}

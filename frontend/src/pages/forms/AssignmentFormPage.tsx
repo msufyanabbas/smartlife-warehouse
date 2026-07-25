@@ -331,14 +331,13 @@ function AssignmentEditor({ id, doc, onClose, onCreated }: {
         {alreadyIssued && (
           <div style={{
             display: 'flex', alignItems: 'center', gap: 8,
-            background: 'rgba(245,158,11,0.08)',
-            border: '1px solid rgba(245,158,11,0.3)',
+            background: 'var(--blue-dim)',
+            border: '1px solid rgba(0,194,255,0.3)',
             borderRadius: 'var(--radius)', padding: '10px 14px', marginBottom: 16,
           }}>
-            <AlertCircle size={16} color="#f59e0b" style={{ flexShrink: 0 }} />
-            <span style={{ fontSize: 13, color: '#b45309', fontWeight: 500 }}>
-              This form has already been issued. Quantities are locked, but you can correct the
-              Assigned To / Requested By details and click Save.
+            <AlertCircle size={16} color="var(--blue)" style={{ flexShrink: 0 }} />
+            <span style={{ fontSize: 13, color: 'var(--blue)', fontWeight: 500 }}>
+              This form has been issued. You can edit any field and save changes.
             </span>
           </div>
         )}
@@ -402,7 +401,6 @@ function AssignmentEditor({ id, doc, onClose, onCreated }: {
           newRowDefaults={ROW_DEFAULTS}
           totalKey="qtyIssued"
           totalLabel="Total Quantity Assigned"
-          readOnly={alreadyIssued}
         />
 
         <div style={{ marginTop: 18 }}>

@@ -414,138 +414,207 @@ function StockMovementReport() {
     XLSX.writeFile(wb, `stock-report-${dateFrom || 'all'}-to-${dateTo || 'today'}.xlsx`);
   };
 
-  /** Same rows as the Excel export and the table — reportRows is already filtered. */
-  const exportPdf = () => {
+  /**
+   * The PDF record of this report, laid out to match the printed warehouse
+   * documents (see components/documents/PrintDocument.tsx) — same ink, tinted
+   * doc-number box, title bar over the purple/cyan strip, zebra table.
+   *
+   * Rows are `reportRows`, so the export is exactly what the table is showing:
+   * already filtered by date, scheme, category and search.
+   */
+  const exportPdf = async () => {
     const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+    const pageW = doc.internal.pageSize.width;   // 297mm
+    const pageH = doc.internal.pageSize.height;  // 210mm
+    const margin = 14;
 
-    // Header
-    doc.setFontSize(16);
+    // ── Load logo ──
+    let logoAdded = false;
+    try {
+      const response = await fetch('/smartlife.png');
+      const blob = await response.blob();
+      const reader = new FileReader();
+      const logoData = await new Promise<string>((resolve, reject) => {
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(blob);
+      });
+      // 34.4 × 13 keeps the asset's own 952×360 proportions — the print header
+      // sets a height and lets the width follow, and a stretched logo is the one
+      // thing that reads as "not the same document".
+      doc.addImage(logoData, 'PNG', margin, 10, 34.4, 13);
+      logoAdded = true;
+    } catch { /* skip logo if fails */ }
+
+    // ── Company name ──
+    const textX = margin;
+    const nameY = logoAdded ? 27 : 14;
+    doc.setFontSize(9);
     doc.setFont('helvetica', 'bold');
-    doc.text('Smart Life Contracting Company', 14, 15);
-
-    doc.setFontSize(11);
+    doc.setTextColor(26, 26, 62);
+    doc.text('SMART LIFE CONTRACTING COMPANY', textX, nameY);
+    doc.setFontSize(7);
     doc.setFont('helvetica', 'normal');
-    doc.text('STOCK MOVEMENT REPORT', 14, 22);
+    doc.setTextColor(156, 163, 175);
+    doc.text('WAREHOUSE & INVENTORY MANAGEMENT', textX, nameY + 4);
 
-    doc.setFontSize(9);
-    doc.setTextColor(120, 120, 120);
-    doc.text(
-      `Period: ${dateFrom ? format(new Date(dateFrom), 'dd MMM yyyy') : 'All'} → ${dateTo ? format(new Date(dateTo), 'dd MMM yyyy') : 'Today'}`,
-      14, 28,
-    );
-    doc.text(`Generated: ${format(new Date(), 'dd MMM yyyy HH:mm')}`, 14, 33);
-    doc.text(`Total Items: ${reportRows.length}`, 14, 38);
-
-    // Reset text color
-    doc.setTextColor(0, 0, 0);
-
-    // Summary stats row
-    doc.setFontSize(9);
+    // ── Report period box (top right) ──
+    const boxW = 70, boxH = 22, boxX = pageW - margin - boxW, boxY = 8;
+    doc.setFillColor(240, 240, 248);
+    doc.setDrawColor(224, 224, 239);
+    doc.roundedRect(boxX, boxY, boxW, boxH, 2, 2, 'FD');
+    doc.setFontSize(7);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(156, 163, 175);
+    doc.text('REPORT PERIOD', boxX + boxW - 4, boxY + 6, { align: 'right' });
+    doc.setFontSize(11);
     doc.setFont('helvetica', 'bold');
-    const statsY = 44;
-    doc.text(`Opening: ${totals.opening.toLocaleString()}`, 14, statsY);
-    doc.text(`Received: +${totals.received.toLocaleString()}`, 60, statsY);
-    doc.text(`Assigned: ${totals.assigned.toLocaleString()}`, 110, statsY);
-    doc.text(`Issued: ${totals.issued.toLocaleString()}`, 160, statsY);
-    doc.text(`Closing: ${totals.closing.toLocaleString()}`, 210, statsY);
+    doc.setTextColor(26, 26, 62);
+    const periodText = `${dateFrom ? format(new Date(dateFrom), 'dd MMM yyyy') : 'All'} → ${dateTo ? format(new Date(dateTo), 'dd MMM yyyy') : 'Today'}`;
+    doc.text(periodText, boxX + boxW - 4, boxY + 13, { align: 'right' });
+    doc.setFontSize(7);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(156, 163, 175);
+    doc.text(`Generated: ${format(new Date(), 'dd MMM yyyy HH:mm')}`, boxX + boxW - 4, boxY + 19, { align: 'right' });
 
-    // Table
+    // ── Title bar ──
+    const titleY = 34;
+    doc.setFillColor(26, 26, 62);
+    doc.rect(margin, titleY, pageW - margin * 2, 9, 'F');
+    doc.setFontSize(12);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(255, 255, 255);
+    doc.text('STOCK MOVEMENT REPORT', pageW / 2, titleY + 6.2, { align: 'center' });
+
+    // ── Two-color accent strip ──
+    const stripY = titleY + 9;
+    const stripW = (pageW - margin * 2) / 2;
+    doc.setFillColor(107, 47, 217);  // Purple
+    doc.rect(margin, stripY, stripW, 2.5, 'F');
+    doc.setFillColor(0, 194, 255);   // Cyan
+    doc.rect(margin + stripW, stripY, stripW, 2.5, 'F');
+
+    // ── Summary stat boxes ──
+    const statsY = stripY + 5;
+    const statsH = 14;
+    const statW = (pageW - margin * 2) / 4;
+    const stats = [
+      { label: 'OPENING STOCK', value: totals.opening.toLocaleString(), color: [26, 26, 62] as [number, number, number] },
+      { label: 'RECEIVED', value: `+${totals.received.toLocaleString()}`, color: [0, 150, 80] as [number, number, number] },
+      { label: 'ASSIGNED', value: totals.assigned.toLocaleString(), color: [107, 47, 217] as [number, number, number] },
+      { label: 'CLOSING STOCK', value: totals.closing.toLocaleString(), color: [0, 136, 204] as [number, number, number] },
+    ];
+    stats.forEach((stat, i) => {
+      const sx = margin + i * statW;
+      doc.setFillColor(255, 255, 255);
+      doc.setDrawColor(229, 231, 235);
+      doc.rect(sx, statsY, statW, statsH, 'FD');
+      doc.setFontSize(6.5);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(156, 163, 175);
+      doc.text(stat.label, sx + statW / 2, statsY + 4.5, { align: 'center' });
+      doc.setFontSize(14);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(...stat.color);
+      doc.text(stat.value, sx + statW / 2, statsY + 11, { align: 'center' });
+    });
+
+    // ── Table label ──
+    const tableLabelY = statsY + statsH + 5;
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(26, 26, 62);
+    doc.text('STOCK ITEMS', margin, tableLabelY);
+
+    // ── Main table ──
     autoTable(doc, {
-      startY: 50,
-      head: [[
-        '#',
-        'Product',
-        'SKU',
-        'Serial No.',
-        'Scheme',
-        'Opening',
-        'Received',
-        'Assigned',
-        'Issued',
-        'Closing',
-      ]],
+      startY: tableLabelY + 3,
+      head: [['#', 'Product', 'SKU', 'Scheme', 'Opening', 'Received', 'Assigned', 'Issued', 'Closing']],
       body: [
         ...reportRows.map((row, idx) => [
           idx + 1,
           row.name,
           row.sku,
-          row.serialNumber || '—',
           row.schemeNo || '—',
-          row.opening,
+          row.opening || '—',
           row.received > 0 ? `+${row.received}` : '—',
-          row.assigned > 0 ? row.assigned : '—',
+          row.assigned > 0 ? String(row.assigned) : '—',
           row.issued > 0 ? `-${row.issued}` : '—',
           row.closing,
         ]),
         // Totals row
-        [
-          '',
-          `TOTAL (${reportRows.length} items)`,
-          '', '', '',
-          totals.opening,
-          `+${totals.received}`,
-          totals.assigned,
-          totals.issued > 0 ? `-${totals.issued}` : '0',
-          totals.closing,
-        ],
+        ['', `TOTAL (${reportRows.length} items)`, '', '',
+          totals.opening, `+${totals.received}`, totals.assigned,
+          totals.issued > 0 ? `-${totals.issued}` : '0', totals.closing],
       ],
-      styles: {
-        fontSize: 8,
-        cellPadding: 2.5,
-        overflow: 'linebreak',
-      },
+      styles: { fontSize: 8, cellPadding: 2.5 },
       headStyles: {
-        fillColor: [26, 26, 62],   // Dark navy matching brand
+        fillColor: [26, 26, 62],
         textColor: [255, 255, 255],
         fontStyle: 'bold',
         fontSize: 8,
+        halign: 'center',
       },
       columnStyles: {
-        0: { cellWidth: 8, halign: 'center' },   // #
-        1: { cellWidth: 50 },                     // Product
-        2: { cellWidth: 28, font: 'courier' },    // SKU
-        3: { cellWidth: 25, font: 'courier' },    // Serial No.
-        4: { cellWidth: 28 },                     // Scheme
-        5: { cellWidth: 18, halign: 'center' },   // Opening
-        6: { cellWidth: 18, halign: 'center', textColor: [0, 150, 80] },   // Received (green)
-        7: { cellWidth: 18, halign: 'center', textColor: [150, 80, 200] }, // Assigned (purple)
-        8: { cellWidth: 18, halign: 'center', textColor: [200, 100, 0] },  // Issued (orange)
-        9: { cellWidth: 18, halign: 'center', fontStyle: 'bold' },         // Closing
+        0: { cellWidth: 8, halign: 'center' },
+        1: { cellWidth: 60 },
+        2: { cellWidth: 35, font: 'courier', fontSize: 7 },
+        3: { cellWidth: 32 },
+        4: { cellWidth: 20, halign: 'center' },
+        5: { cellWidth: 20, halign: 'center', textColor: [0, 150, 80] },
+        6: { cellWidth: 20, halign: 'center', textColor: [107, 47, 217] },
+        7: { cellWidth: 20, halign: 'center', textColor: [200, 100, 0] },
+        8: { cellWidth: 20, halign: 'center', fontStyle: 'bold' },
       },
-      alternateRowStyles: {
-        fillColor: [248, 248, 252],
-      },
-      // Style the totals row differently
+      alternateRowStyles: { fillColor: [248, 248, 252] },
       didParseCell: (data) => {
-        if (data.row.index === reportRows.length) {
-          data.cell.styles.fillColor = [240, 240, 255];
+        // Style totals row. Section-guarded: with no rows at all the totals row
+        // sits at body index 0, which would otherwise repaint the header too.
+        if (data.section === 'body' && data.row.index === reportRows.length) {
+          data.cell.styles.fillColor = [240, 240, 248];
           data.cell.styles.fontStyle = 'bold';
           data.cell.styles.fontSize = 9;
+          data.cell.styles.textColor = [26, 26, 62];
         }
       },
-      // Add page numbers
       didDrawPage: (data) => {
-        const pageCount = doc.getNumberOfPages();
-        doc.setFontSize(8);
+        // Footer on every page
+        const totalPages = doc.getNumberOfPages();
+        doc.setFontSize(7);
+        doc.setFont('helvetica', 'normal');
         doc.setTextColor(150, 150, 150);
         doc.text(
-          `Page ${data.pageNumber} of ${pageCount}`,
-          doc.internal.pageSize.width - 20,
-          doc.internal.pageSize.height - 8,
-          { align: 'right' },
+          'Smart Life Contracting Company — Confidential',
+          margin,
+          pageH - 6,
         );
         doc.text(
-          'Smart Life Contracting Company — Confidential',
-          14,
-          doc.internal.pageSize.height - 8,
+          `Page ${data.pageNumber} of ${totalPages}`,
+          pageW - margin,
+          pageH - 6,
+          { align: 'right' },
         );
       },
-      margin: { top: 50, left: 14, right: 14 },
+      margin: { top: 50, left: margin, right: margin, bottom: 12 },
     });
 
+    // ── Filters note if active ──
+    const filterParts = [];
+    if (schemeFilters.length > 0) filterParts.push(`Schemes: ${schemeFilters.join(', ')}`);
+    if (categoryFilters.length > 0) filterParts.push(`Categories: ${categoryFilters.join(', ')}`);
+    if (search) filterParts.push(`Search: "${search}"`);
+    if (dateFrom || dateTo) filterParts.push(`Date: ${dateFrom || 'All'} → ${dateTo || 'Today'}`);
+
+    if (filterParts.length > 0) {
+      // autoTable stamps this on the doc but does not augment jsPDF's types.
+      const finalY = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 4;
+      doc.setFontSize(7);
+      doc.setTextColor(150, 150, 150);
+      doc.text(`Filters applied: ${filterParts.join(' · ')}`, margin, finalY);
+    }
+
     // Save
-    const filename = `stock-report-${dateFrom || 'all'}-to-${dateTo || 'today'}.pdf`;
-    doc.save(filename);
+    doc.save(`stock-report-${dateFrom || 'all'}-to-${dateTo || 'today'}.pdf`);
   };
 
   const clearFilters = () => {
@@ -574,7 +643,7 @@ function StockMovementReport() {
           <button className="btn btn-ghost" onClick={exportExcel}>
             <Download size={14} /> Excel
           </button>
-          <button className="btn btn-ghost" onClick={exportPdf}>
+          <button className="btn btn-ghost" onClick={() => exportPdf()}>
             <FileDown size={14} /> PDF
           </button>
         </div>

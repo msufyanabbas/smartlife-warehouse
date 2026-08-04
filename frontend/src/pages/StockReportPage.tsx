@@ -1,6 +1,8 @@
 import { useState, useMemo, type ReactNode } from 'react';
 import * as XLSX from 'xlsx';
-import { BarChart2, ClipboardCheck, Download, Search, Filter } from 'lucide-react';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
+import { BarChart2, ClipboardCheck, Download, FileDown, Search, Filter } from 'lucide-react';
 import { format, startOfMonth, endOfMonth, subMonths } from 'date-fns';
 import { useInventory, useItemUsage, useGrnList, useAssignmentForms } from '../hooks/useApi';
 import MultiSelect from '../components/MultiSelect';
@@ -412,6 +414,140 @@ function StockMovementReport() {
     XLSX.writeFile(wb, `stock-report-${dateFrom || 'all'}-to-${dateTo || 'today'}.xlsx`);
   };
 
+  /** Same rows as the Excel export and the table — reportRows is already filtered. */
+  const exportPdf = () => {
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+
+    // Header
+    doc.setFontSize(16);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Smart Life Contracting Company', 14, 15);
+
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'normal');
+    doc.text('STOCK MOVEMENT REPORT', 14, 22);
+
+    doc.setFontSize(9);
+    doc.setTextColor(120, 120, 120);
+    doc.text(
+      `Period: ${dateFrom ? format(new Date(dateFrom), 'dd MMM yyyy') : 'All'} → ${dateTo ? format(new Date(dateTo), 'dd MMM yyyy') : 'Today'}`,
+      14, 28,
+    );
+    doc.text(`Generated: ${format(new Date(), 'dd MMM yyyy HH:mm')}`, 14, 33);
+    doc.text(`Total Items: ${reportRows.length}`, 14, 38);
+
+    // Reset text color
+    doc.setTextColor(0, 0, 0);
+
+    // Summary stats row
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'bold');
+    const statsY = 44;
+    doc.text(`Opening: ${totals.opening.toLocaleString()}`, 14, statsY);
+    doc.text(`Received: +${totals.received.toLocaleString()}`, 60, statsY);
+    doc.text(`Assigned: ${totals.assigned.toLocaleString()}`, 110, statsY);
+    doc.text(`Issued: ${totals.issued.toLocaleString()}`, 160, statsY);
+    doc.text(`Closing: ${totals.closing.toLocaleString()}`, 210, statsY);
+
+    // Table
+    autoTable(doc, {
+      startY: 50,
+      head: [[
+        '#',
+        'Product',
+        'SKU',
+        'Serial No.',
+        'Scheme',
+        'Opening',
+        'Received',
+        'Assigned',
+        'Issued',
+        'Closing',
+      ]],
+      body: [
+        ...reportRows.map((row, idx) => [
+          idx + 1,
+          row.name,
+          row.sku,
+          row.serialNumber || '—',
+          row.schemeNo || '—',
+          row.opening,
+          row.received > 0 ? `+${row.received}` : '—',
+          row.assigned > 0 ? row.assigned : '—',
+          row.issued > 0 ? `-${row.issued}` : '—',
+          row.closing,
+        ]),
+        // Totals row
+        [
+          '',
+          `TOTAL (${reportRows.length} items)`,
+          '', '', '',
+          totals.opening,
+          `+${totals.received}`,
+          totals.assigned,
+          totals.issued > 0 ? `-${totals.issued}` : '0',
+          totals.closing,
+        ],
+      ],
+      styles: {
+        fontSize: 8,
+        cellPadding: 2.5,
+        overflow: 'linebreak',
+      },
+      headStyles: {
+        fillColor: [26, 26, 62],   // Dark navy matching brand
+        textColor: [255, 255, 255],
+        fontStyle: 'bold',
+        fontSize: 8,
+      },
+      columnStyles: {
+        0: { cellWidth: 8, halign: 'center' },   // #
+        1: { cellWidth: 50 },                     // Product
+        2: { cellWidth: 28, font: 'courier' },    // SKU
+        3: { cellWidth: 25, font: 'courier' },    // Serial No.
+        4: { cellWidth: 28 },                     // Scheme
+        5: { cellWidth: 18, halign: 'center' },   // Opening
+        6: { cellWidth: 18, halign: 'center', textColor: [0, 150, 80] },   // Received (green)
+        7: { cellWidth: 18, halign: 'center', textColor: [150, 80, 200] }, // Assigned (purple)
+        8: { cellWidth: 18, halign: 'center', textColor: [200, 100, 0] },  // Issued (orange)
+        9: { cellWidth: 18, halign: 'center', fontStyle: 'bold' },         // Closing
+      },
+      alternateRowStyles: {
+        fillColor: [248, 248, 252],
+      },
+      // Style the totals row differently
+      didParseCell: (data) => {
+        if (data.row.index === reportRows.length) {
+          data.cell.styles.fillColor = [240, 240, 255];
+          data.cell.styles.fontStyle = 'bold';
+          data.cell.styles.fontSize = 9;
+        }
+      },
+      // Add page numbers
+      didDrawPage: (data) => {
+        const pageCount = doc.getNumberOfPages();
+        doc.setFontSize(8);
+        doc.setTextColor(150, 150, 150);
+        doc.text(
+          `Page ${data.pageNumber} of ${pageCount}`,
+          doc.internal.pageSize.width - 20,
+          doc.internal.pageSize.height - 8,
+          { align: 'right' },
+        );
+        doc.text(
+          'Smart Life Contracting Company — Confidential',
+          14,
+          doc.internal.pageSize.height - 8,
+        );
+      },
+      margin: { top: 50, left: 14, right: 14 },
+    });
+
+    // Save
+    const filename = `stock-report-${dateFrom || 'all'}-to-${dateTo || 'today'}.pdf`;
+    doc.save(filename);
+  };
+
   const clearFilters = () => {
     setSearch(''); setSchemeFilters([]); setCategoryFilters([]);
     // Reset dates to this month default, not empty (empty breaks date formatting)
@@ -434,9 +570,14 @@ function StockMovementReport() {
           {dateFrom ? format(new Date(dateFrom), 'dd MMM yyyy') : 'All time'} → {dateTo ? format(new Date(dateTo), 'dd MMM yyyy') : 'today'}
           {' · '}{reportRows.length} items
         </p>
-        <button className="btn btn-ghost" onClick={exportExcel}>
-          <Download size={14} /> Export Excel
-        </button>
+        <div className="flex gap-2">
+          <button className="btn btn-ghost" onClick={exportExcel}>
+            <Download size={14} /> Excel
+          </button>
+          <button className="btn btn-ghost" onClick={exportPdf}>
+            <FileDown size={14} /> PDF
+          </button>
+        </div>
       </div>
 
       {/* Quick range buttons */}

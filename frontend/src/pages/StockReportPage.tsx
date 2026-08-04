@@ -459,26 +459,48 @@ function StockMovementReport() {
     doc.text('WAREHOUSE & INVENTORY MANAGEMENT', textX, nameY + 4);
 
     // ── Report period box (top right) ──
-    const boxW = 70, boxH = 22, boxX = pageW - margin - boxW, boxY = 8;
+    // From and to sit on their own lines: a single "01 Aug 2026 → 04 Aug 2026"
+    // run is wider than the box at any weight worth reading.
+    const boxW = 80, boxH = 26, boxX = pageW - margin - boxW, boxY = 8;
     doc.setFillColor(240, 240, 248);
     doc.setDrawColor(224, 224, 239);
     doc.roundedRect(boxX, boxY, boxW, boxH, 2, 2, 'FD');
-    doc.setFontSize(7);
+
+    const fromText = dateFrom ? format(new Date(dateFrom), 'dd MMM yyyy') : 'All time';
+    const toText = dateTo ? format(new Date(dateTo), 'dd MMM yyyy') : 'Today';
+
+    // Line 1: FROM date
+    doc.setFontSize(8);
     doc.setFont('helvetica', 'normal');
-    doc.setTextColor(156, 163, 175);
-    doc.text('REPORT PERIOD', boxX + boxW - 4, boxY + 6, { align: 'right' });
-    doc.setFontSize(11);
+    doc.setTextColor(120, 120, 120);
+    doc.text('FROM', boxX + boxW - 4, boxY + 6, { align: 'right' });
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(26, 26, 62);
-    const periodText = `${dateFrom ? format(new Date(dateFrom), 'dd MMM yyyy') : 'All'} → ${dateTo ? format(new Date(dateTo), 'dd MMM yyyy') : 'Today'}`;
-    doc.text(periodText, boxX + boxW - 4, boxY + 13, { align: 'right' });
+    doc.text(fromText, boxX + boxW - 4, boxY + 11, { align: 'right' });
+
+    // Line 2: TO date
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(120, 120, 120);
+    doc.text('TO', boxX + boxW - 4, boxY + 16, { align: 'right' });
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(26, 26, 62);
+    doc.text(toText, boxX + boxW - 4, boxY + 21, { align: 'right' });
+
+    // ── Generated stamp, below the box ──
     doc.setFontSize(7);
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(156, 163, 175);
-    doc.text(`Generated: ${format(new Date(), 'dd MMM yyyy HH:mm')}`, boxX + boxW - 4, boxY + 19, { align: 'right' });
+    doc.text(
+      `Generated: ${format(new Date(), 'dd MMM yyyy HH:mm')}`,
+      pageW - margin,
+      boxY + boxH + 5,
+      { align: 'right' },
+    );
 
     // ── Title bar ──
-    const titleY = 34;
+    // Pushed down to clear the taller box (ends at 34) and the generated stamp
+    // below it (baseline 39); everything under the bar is measured off titleY.
+    const titleY = 43;
     doc.setFillColor(26, 26, 62);
     doc.rect(margin, titleY, pageW - margin * 2, 9, 'F');
     doc.setFontSize(12);

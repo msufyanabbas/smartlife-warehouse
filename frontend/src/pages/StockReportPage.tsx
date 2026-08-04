@@ -424,9 +424,13 @@ function StockMovementReport() {
    */
   const exportPdf = async () => {
     const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
-    const pageW = doc.internal.pageSize.width;   // 297mm
-    const pageH = doc.internal.pageSize.height;  // 210mm
-    const margin = 14;
+    const pageW = doc.internal.pageSize.width;        // 297mm
+    const pageH = doc.internal.pageSize.height;       // 210mm
+    const marginL = 14;                               // left margin
+    const marginR = 14;                               // right margin
+    const contentW = pageW - marginL - marginR;       // usable width = 269mm
+    // Every band on the page — header box, title bar, strip, stats, table —
+    // is laid out from marginL and contentW, so they share both edges exactly.
 
     // ── Load logo ──
     let logoAdded = false;
@@ -442,12 +446,12 @@ function StockMovementReport() {
       // 34.4 × 13 keeps the asset's own 952×360 proportions — the print header
       // sets a height and lets the width follow, and a stretched logo is the one
       // thing that reads as "not the same document".
-      doc.addImage(logoData, 'PNG', margin, 10, 34.4, 13);
+      doc.addImage(logoData, 'PNG', marginL, 10, 34.4, 13);
       logoAdded = true;
     } catch { /* skip logo if fails */ }
 
     // ── Company name ──
-    const textX = margin;
+    const textX = marginL;
     const nameY = logoAdded ? 27 : 14;
     doc.setFontSize(9);
     doc.setFont('helvetica', 'bold');
@@ -461,7 +465,7 @@ function StockMovementReport() {
     // ── Report period box (top right) ──
     // From and to sit on their own lines: a single "01 Aug 2026 → 04 Aug 2026"
     // run is wider than the box at any weight worth reading.
-    const boxW = 80, boxH = 26, boxX = pageW - margin - boxW, boxY = 8;
+    const boxW = 75, boxH = 26, boxX = pageW - marginR - boxW, boxY = 8;
     doc.setFillColor(240, 240, 248);
     doc.setDrawColor(224, 224, 239);
     doc.roundedRect(boxX, boxY, boxW, boxH, 2, 2, 'FD');
@@ -492,7 +496,7 @@ function StockMovementReport() {
     doc.setTextColor(156, 163, 175);
     doc.text(
       `Generated: ${format(new Date(), 'dd MMM yyyy HH:mm')}`,
-      pageW - margin,
+      pageW - marginR,
       boxY + boxH + 5,
       { align: 'right' },
     );
@@ -502,35 +506,41 @@ function StockMovementReport() {
     // below it (baseline 39); everything under the bar is measured off titleY.
     const titleY = 43;
     doc.setFillColor(26, 26, 62);
-    doc.rect(margin, titleY, pageW - margin * 2, 9, 'F');
+    doc.rect(marginL, titleY, contentW, 9, 'F');
     doc.setFontSize(12);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(255, 255, 255);
-    doc.text('STOCK MOVEMENT REPORT', pageW / 2, titleY + 6.2, { align: 'center' });
+    doc.text('STOCK MOVEMENT REPORT', marginL + contentW / 2, titleY + 6.2, { align: 'center' });
 
     // ── Two-color accent strip ──
     const stripY = titleY + 9;
-    const stripW = (pageW - margin * 2) / 2;
+    const stripW = contentW / 2;
     doc.setFillColor(107, 47, 217);  // Purple
-    doc.rect(margin, stripY, stripW, 2.5, 'F');
+    doc.rect(marginL, stripY, stripW, 2.5, 'F');
     doc.setFillColor(0, 194, 255);   // Cyan
-    doc.rect(margin + stripW, stripY, stripW, 2.5, 'F');
+    doc.rect(marginL + stripW, stripY, stripW, 2.5, 'F');
 
     // ── Summary stat boxes ──
     const statsY = stripY + 5;
     const statsH = 14;
-    const statW = (pageW - margin * 2) / 4;
+    const statW = contentW / 4;  // exactly 67.25mm each
     const stats = [
       { label: 'OPENING STOCK', value: totals.opening.toLocaleString(), color: [26, 26, 62] as [number, number, number] },
       { label: 'RECEIVED', value: `+${totals.received.toLocaleString()}`, color: [0, 150, 80] as [number, number, number] },
       { label: 'ASSIGNED', value: totals.assigned.toLocaleString(), color: [107, 47, 217] as [number, number, number] },
       { label: 'CLOSING STOCK', value: totals.closing.toLocaleString(), color: [0, 136, 204] as [number, number, number] },
     ];
+    // One rectangle across the full content width, then dividers — four abutting
+    // rects double-strike their shared edges, which is what reads as a gap.
+    doc.setFillColor(255, 255, 255);
+    doc.setDrawColor(229, 231, 235);
+    doc.rect(marginL, statsY, contentW, statsH, 'FD');
+    for (let i = 1; i < 4; i++) {
+      doc.line(marginL + i * statW, statsY, marginL + i * statW, statsY + statsH);
+    }
+
     stats.forEach((stat, i) => {
-      const sx = margin + i * statW;
-      doc.setFillColor(255, 255, 255);
-      doc.setDrawColor(229, 231, 235);
-      doc.rect(sx, statsY, statW, statsH, 'FD');
+      const sx = marginL + i * statW;
       doc.setFontSize(6.5);
       doc.setFont('helvetica', 'normal');
       doc.setTextColor(156, 163, 175);
@@ -546,7 +556,7 @@ function StockMovementReport() {
     doc.setFontSize(8);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(26, 26, 62);
-    doc.text('STOCK ITEMS', margin, tableLabelY);
+    doc.text('STOCK ITEMS', marginL, tableLabelY);
 
     // ── Main table ──
     autoTable(doc, {
@@ -577,16 +587,18 @@ function StockMovementReport() {
         fontSize: 8,
         halign: 'center',
       },
+      // Widths sum to contentW (269mm), so the table spans the same band as the
+      // title bar and the stats row: 8+65+38+38+24+24+24+24+24.
       columnStyles: {
         0: { cellWidth: 8, halign: 'center' },
-        1: { cellWidth: 60 },
-        2: { cellWidth: 35, font: 'courier', fontSize: 7 },
-        3: { cellWidth: 32 },
-        4: { cellWidth: 20, halign: 'center' },
-        5: { cellWidth: 20, halign: 'center', textColor: [0, 150, 80] },
-        6: { cellWidth: 20, halign: 'center', textColor: [107, 47, 217] },
-        7: { cellWidth: 20, halign: 'center', textColor: [200, 100, 0] },
-        8: { cellWidth: 20, halign: 'center', fontStyle: 'bold' },
+        1: { cellWidth: 65 },
+        2: { cellWidth: 38, font: 'courier', fontSize: 7 },
+        3: { cellWidth: 38 },
+        4: { cellWidth: 24, halign: 'center' },
+        5: { cellWidth: 24, halign: 'center', textColor: [0, 150, 80] },
+        6: { cellWidth: 24, halign: 'center', textColor: [107, 47, 217] },
+        7: { cellWidth: 24, halign: 'center', textColor: [200, 100, 0] },
+        8: { cellWidth: 24, halign: 'center', fontStyle: 'bold' },
       },
       alternateRowStyles: { fillColor: [248, 248, 252] },
       didParseCell: (data) => {
@@ -607,17 +619,17 @@ function StockMovementReport() {
         doc.setTextColor(150, 150, 150);
         doc.text(
           'Smart Life Contracting Company — Confidential',
-          margin,
+          marginL,
           pageH - 6,
         );
         doc.text(
           `Page ${data.pageNumber} of ${totalPages}`,
-          pageW - margin,
+          pageW - marginR,
           pageH - 6,
           { align: 'right' },
         );
       },
-      margin: { top: 50, left: margin, right: margin, bottom: 12 },
+      margin: { top: 50, left: marginL, right: marginR, bottom: 12 },
     });
 
     // ── Filters note if active ──
@@ -632,7 +644,7 @@ function StockMovementReport() {
       const finalY = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 4;
       doc.setFontSize(7);
       doc.setTextColor(150, 150, 150);
-      doc.text(`Filters applied: ${filterParts.join(' · ')}`, margin, finalY);
+      doc.text(`Filters applied: ${filterParts.join(' · ')}`, marginL, finalY);
     }
 
     // Save

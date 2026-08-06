@@ -63,15 +63,20 @@ function ItemCodePicker({
     .filter(p => !usedIds.includes(p.id) || p.id === selectedId);
 
   const q = query.trim().toLowerCase();
-  const stockOptions = (availableItems ?? (stock as StockItem[]))
+  const stockMatches = (availableItems ?? (stock as StockItem[]))
     // A restricted list has already decided what may be offered, and its
     // quantities are not warehouse balances — stock assigned out to a worker
     // reads zero on the shelf, which is exactly the case it exists to cover.
     .filter(i => !!availableItems || (i.isActive && (stockOf(i) > 0 || i.id === selectedId)))
     .filter(i => !filterStock || filterStock(i))
     .filter(i => !usedIds.includes(i.id) || i.id === selectedId)
-    .filter(i => !q || i.sku.toLowerCase().includes(q) || i.name.toLowerCase().includes(q))
-    .slice(0, 10);
+    .filter(i => !q || i.sku.toLowerCase().includes(q) || i.name.toLowerCase().includes(q));
+
+  // The whole catalogue is capped so an unfiltered dropdown stays usable, and
+  // typing narrows it. A restricted list is short and finite by construction —
+  // capping it would hide holdings the user has no query to reach. The dropdown
+  // scrolls either way.
+  const stockOptions = availableItems ? stockMatches : stockMatches.slice(0, 10);
 
   const pickProduct = (p: CatalogProduct) => {
     setQuery(p.sku);

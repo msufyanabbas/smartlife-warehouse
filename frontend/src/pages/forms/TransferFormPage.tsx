@@ -29,7 +29,7 @@ const COLUMNS: LineColumn[] = [
   { key: 'unit', label: 'Unit', width: '8%' },
   {
     key: 'stockQty', label: 'Stock Qty (From)', type: 'readonly', width: '11%',
-    hint: 'Quantity the selected "Issued By" person currently holds',
+    hint: 'Quantity the selected "Issued By" person can send',
     // Working figure only — see the assignment form's Stock Available column.
     hideOnPrint: true,
   },
@@ -243,21 +243,18 @@ function TransferEditor({ id, doc, onClose, onCreated }: {
   const issuedByIsWorker = issuedBy?.role === 'worker';
 
   /**
-   * Only what the person issuing the transfer actually holds can leave on it.
-   * For a worker that is the stock booked out to them on issued assignment forms
-   * (ASN); for a storekeeper or manager it is everything currently out on
-   * assignment. Either way the option keeps its inventory row — the saved line's
-   * `itemId` has to be a real inventory id — and carries the held quantity in
-   * place of the warehouse balance, which for assigned-out stock reads zero.
+   * A worker can only send what was booked out to them on issued assignment
+   * forms (ASN), so their options carry the assigned quantity in place of the
+   * warehouse balance — which for assigned-out stock reads zero. A manager or
+   * storekeeper issues against the whole catalogue and its own balances.
+   *
+   * Either way the option keeps its inventory row: the saved line's `itemId`
+   * has to be a real inventory id.
    */
   const availableItems = useMemo(() => {
     if (!form.issuedById) return [];
 
-    if (!issuedByIsWorker) {
-      return stock
-        .filter(i => i.assignedQuantity > 0)
-        .map(i => ({ ...i, availableQuantity: i.assignedQuantity }));
-    }
+    if (!issuedByIsWorker) return stock;
 
     const byId = new Map(stock.map(i => [i.id, i]));
     const held = new Map<string, any>();
@@ -315,7 +312,7 @@ function TransferEditor({ id, doc, onClose, onCreated }: {
     ? 'Select "Issued By" above to see the items available to transfer'
     : issuedByIsWorker
       ? `Nothing is assigned to ${fullName(issuedBy!)} on an issued assignment form`
-      : 'No stock is currently assigned out';
+      : 'No stock available at this location';
 
   const save = async (status: TransferForm['status']) => {
     const payload = {

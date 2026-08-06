@@ -21,6 +21,7 @@ interface StockItem {
 // ── Item code autocomplete ─────────────────────────────────────────────────
 function ItemCodePicker({
   row, source, filterStock, onPick, readOnly, usedIds, stockField, serialField, resolveStock,
+  availableItems, emptyOptionsMessage,
 }: {
   row: LineRow;
   source: 'products' | 'inventory';
@@ -31,10 +32,15 @@ function ItemCodePicker({
   stockField?: string;
   serialField: string;
   resolveStock?: (item: StockItem) => number;
+  availableItems?: StockItem[];
+  emptyOptionsMessage?: string;
 }) {
-  // A form can supply its own on-hand figure (the document-derived one, say);
-  // otherwise the row's own balance stands.
-  const stockOf = (item: StockItem) => resolveStock?.(item) ?? item.availableQuantity;
+  // A restricted list is offered in place of the inventory catalogue and brings
+  // its own quantity — whatever the form scoped it to (one holder's stock, say)
+  // rather than what is on the shelf — so the document figure is consulted only
+  // for the unrestricted list.
+  const stockOf = (item: StockItem) =>
+    availableItems ? item.availableQuantity : (resolveStock?.(item) ?? item.availableQuantity);
   const [query, setQuery] = useState(row.itemCode);
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -51,7 +57,7 @@ function ItemCodePicker({
     .filter(p => !usedIds.includes(p.id) || p.id === selectedId);
 
   const q = query.trim().toLowerCase();
-  const stockOptions = (stock as StockItem[])
+  const stockOptions = (availableItems ?? (stock as StockItem[]))
     .filter(i => i.isActive && (stockOf(i) > 0 || i.id === selectedId))
     .filter(i => !filterStock || filterStock(i))
     .filter(i => !usedIds.includes(i.id) || i.id === selectedId)
@@ -168,7 +174,7 @@ function ItemCodePicker({
         ) : (
           <div style={{ padding: '12px 16px', fontSize: 13, color: 'var(--text-3)' }}>
             {source !== 'products'
-              ? 'No stock available at this location'
+              ? (emptyOptionsMessage ?? 'No stock available at this location')
               : !query.trim()
                 ? 'Type a code or name to search the catalog…'
                 : 'No matching product in the catalog'}
@@ -192,6 +198,7 @@ export default function LineItemsTable({
   rows, onChange, columns, source, filterStock,
   minRows = 15, readOnly = false, totalKey, totalLabel,
   newRowDefaults = {}, stockField, serialField = 'serialNumber', resolveStock,
+  availableItems, emptyOptionsMessage,
 }: {
   rows: LineRow[];
   onChange: (rows: LineRow[]) => void;
@@ -209,6 +216,14 @@ export default function LineItemsTable({
   serialField?: string;
   /** Overrides where a picked item's on-hand quantity is read from. Defaults to the inventory row. */
   resolveStock?: (item: StockItem) => number;
+  /**
+   * Offers these items instead of the whole inventory catalogue, taking each
+   * one's `availableQuantity` as given. Entries keep their real inventory `id`
+   * so the picked line still writes a valid `itemId`. Pass `[]` to offer nothing.
+   */
+  availableItems?: StockItem[];
+  /** Replaces the "no stock" text under an empty inventory dropdown. */
+  emptyOptionsMessage?: string;
 }) {
   const usedIds = rows.map(r => r.productId || r.itemId).filter(Boolean) as string[];
 
@@ -269,6 +284,8 @@ export default function LineItemsTable({
                       stockField={stockField}
                       serialField={serialField}
                       resolveStock={resolveStock}
+                      availableItems={availableItems}
+                      emptyOptionsMessage={emptyOptionsMessage}
                       onPick={patch => patchRow(index, patch)}
                     />
                   ) : (

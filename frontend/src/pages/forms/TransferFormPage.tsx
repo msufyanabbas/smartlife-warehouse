@@ -1,9 +1,9 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { ArrowLeft, ArrowLeftRight, Eye, Plus, Printer, Save } from 'lucide-react';
 import { format } from 'date-fns';
 import toast from 'react-hot-toast';
 import {
-  useCreateTransferForm, useInventory, useTransferForm, useTransferForms,
+  useAssignmentForms, useCreateTransferForm, useInventory, useTransferForm, useTransferForms,
   useUpdateTransferForm, useUsers,
 } from '../../hooks/useApi';
 import DocumentHeader from '../../components/documents/DocumentHeader';
@@ -18,7 +18,6 @@ import {
 import {
   fullName, orUndefined, printDate, printSerials, toDateInput, today, uniqueSorted,
 } from '../../components/documents/formUtils';
-import { useDocumentStock } from '../../hooks/useDocumentStock';
 import type { TransferForm, User } from '../../types';
 
 const MIN_ROWS = 15;
@@ -30,7 +29,7 @@ const COLUMNS: LineColumn[] = [
   { key: 'unit', label: 'Unit', width: '8%' },
   {
     key: 'stockQty', label: 'Stock Qty (From)', type: 'readonly', width: '11%',
-    hint: 'Based on GRN receipts minus ASN assignments',
+    hint: 'Quantity the selected "Issued By" person currently holds',
     // Working figure only — see the assignment form's Stock Available column.
     hideOnPrint: true,
   },
@@ -213,7 +212,7 @@ function TransferEditor({ id, doc, onClose, onCreated }: {
 }) {
   const { data: users = [] } = useUsers();
   const { data: inventory = [] } = useInventory();
-  const { resolveStock } = useDocumentStock();
+  const { data: assignmentForms = [] } = useAssignmentForms();
   const createForm = useCreateTransferForm();
   const updateForm = useUpdateTransferForm();
 
@@ -239,6 +238,84 @@ function TransferEditor({ id, doc, onClose, onCreated }: {
     !form.fromProjectSite ||
     item.projectName === form.fromProjectSite ||
     item.schemeNo === form.fromProjectSite;
+
+  const issuedBy = (users as User[]).find(u => u.id === form.issuedById);
+  const issuedByIsWorker = issuedBy?.role === 'worker';
+
+  /**
+   * Only what the person issuing the transfer actually holds can leave on it.
+   * For a worker that is the stock booked out to them on issued assignment forms
+   * (ASN); for a storekeeper or manager it is everything currently out on
+   * assignment. Either way the option keeps its inventory row — the saved line's
+   * `itemId` has to be a real inventory id — and carries the held quantity in
+   * place of the warehouse balance, which for assigned-out stock reads zero.
+   */
+  const availableItems = useMemo(() => {
+    if (!form.issuedById) return [];
+
+    if (!issuedByIsWorker) {
+      return stock
+        .filter(i => i.assignedQuantity > 0)
+        .map(i => ({ ...i, availableQuantity: i.assignedQuantity }));
+    }
+
+    const byId = new Map(stock.map(i => [i.id, i]));
+    const held = new Map<string, any>();
+
+    for (const asn of assignmentForms as any[]) {
+      if (asn.status !== 'issued' || asn.assignedToId !== form.issuedById) continue;
+      for (const line of asn.items ?? []) {
+        // An issued line always names an inventory item — the backend refuses to
+        // issue one that doesn't — and that id is what makes the pick saveable.
+        if (!line.itemId || !(line.qtyIssued > 0)) continue;
+
+        const already = held.get(line.itemId);
+        if (already) {
+          // The same item issued on more than one of their forms.
+          already.availableQuantity += line.qtyIssued;
+          continue;
+        }
+
+        const item = byId.get(line.itemId);
+        held.set(line.itemId, item
+          ? { ...item, availableQuantity: line.qtyIssued }
+          // The inventory row is gone; the ASN line still describes it well
+          // enough to pick, and its id still saves.
+          : {
+              id: line.itemId,
+              name: line.itemDescription || line.itemCode || 'Item',
+              sku: line.itemCode || '',
+              serialNumber: line.serialNumber || '',
+              isActive: true,
+              availableQuantity: line.qtyIssued,
+              product: { unit: line.unit || '' },
+            });
+      }
+    }
+
+    return [...held.values()];
+  }, [form.issuedById, issuedByIsWorker, assignmentForms, stock]);
+
+  const hasLineItems = rows.some(r => r.itemCode?.trim());
+
+  /**
+   * The item list is scoped to whoever is issuing, so lines picked for the
+   * previous person are no longer theirs to send.
+   */
+  const changeIssuedBy = (userId: string) => {
+    if (hasLineItems &&
+        !confirm('Changing "Issued By" clears the items already entered. Continue?')) {
+      return;
+    }
+    set('issuedById', userId);
+    if (hasLineItems) setRows(toLineRows(undefined, MIN_ROWS, ROW_DEFAULTS));
+  };
+
+  const noOptionsMessage = !form.issuedById
+    ? 'Select "Issued By" above to see the items available to transfer'
+    : issuedByIsWorker
+      ? `Nothing is assigned to ${fullName(issuedBy!)} on an issued assignment form`
+      : 'No stock is currently assigned out';
 
   const save = async (status: TransferForm['status']) => {
     const payload = {
@@ -320,7 +397,7 @@ function TransferEditor({ id, doc, onClose, onCreated }: {
               </Field>
               <Field label="Issued By">
                 <select className="doc-input" value={form.issuedById}
-                  onChange={e => set('issuedById', e.target.value)}>
+                  onChange={e => changeIssuedBy(e.target.value)}>
                   <option value="">— Select —</option>
                   {(users as User[]).map(u => <option key={u.id} value={u.id}>{fullName(u)}</option>)}
                 </select>
@@ -365,19 +442,45 @@ function TransferEditor({ id, doc, onClose, onCreated }: {
           </div>
         </div>
 
-        <LineItemsTable
-          rows={rows}
-          onChange={setRows}
-          columns={COLUMNS}
-          source="inventory"
-          filterStock={filterStock}
-          stockField="stockQty"
-          resolveStock={resolveStock}
-          minRows={MIN_ROWS}
-          newRowDefaults={ROW_DEFAULTS}
-          totalKey="qtyToTransfer"
-          totalLabel="Total Quantity Transferred"
-        />
+        {/*
+          Nothing can be picked before an issuer is chosen. Lines already on the
+          document stay visible either way — a draft saved without an "Issued By"
+          would otherwise look as though its items had been lost.
+        */}
+        {!form.issuedById && !hasLineItems ? (
+          <div style={{
+            textAlign: 'center', padding: '28px 20px', fontSize: 13, color: 'var(--text-3)',
+            border: '1px dashed var(--border)', borderRadius: 'var(--radius)',
+          }}>
+            Select "Issued By" above to see the items available to transfer
+          </div>
+        ) : (
+          <>
+            {!form.issuedById && (
+              <div style={{
+                background: 'var(--yellow-dim)', border: '1px solid rgba(245,158,11,0.25)',
+                borderRadius: 'var(--radius)', padding: '10px 14px', marginBottom: 10,
+                fontSize: 12, color: 'var(--yellow)',
+              }}>
+                Select "Issued By" above — the item picker only lists what that person holds.
+              </div>
+            )}
+            <LineItemsTable
+              rows={rows}
+              onChange={setRows}
+              columns={COLUMNS}
+              source="inventory"
+              filterStock={filterStock}
+              stockField="stockQty"
+              availableItems={availableItems}
+              emptyOptionsMessage={noOptionsMessage}
+              minRows={MIN_ROWS}
+              newRowDefaults={ROW_DEFAULTS}
+              totalKey="qtyToTransfer"
+              totalLabel="Total Quantity Transferred"
+            />
+          </>
+        )}
 
         <div style={{ marginTop: 18 }}>
           <Field label="Notes / Remarks">

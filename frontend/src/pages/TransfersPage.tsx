@@ -1,14 +1,16 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import * as XLSX from 'xlsx';
 import { ArrowLeftRight, Plus, Check, X, Ban, AlertCircle, Search, Download } from 'lucide-react';
 import {
   useTransferRequests, useCreateTransfer, useReviewTransfer,
-  useCancelTransfer, useAssignments, useWorkers,
+  useCancelTransfer, useAssignments, useWorkers, useAssignmentForms,
 } from '../hooks/useApi';
 import { useAuth } from '../contexts/AuthContext';
 import type { TransferRequest } from '../types';
 import Modal from '../components/Modal';
 import { formatDistanceToNow, format } from 'date-fns';
+
+const norm = (v?: string) => (v || '').trim().toLowerCase();
 
 function statusBadge(s: string) {
   const map: any = {
@@ -22,6 +24,7 @@ export default function TransfersPage() {
   const { user } = useAuth();
   const { data: transfers = [], isLoading } = useTransferRequests();
   const { data: assignments = [] } = useAssignments(); // all active assignments (own only for workers)
+  const { data: assignmentForms = [] } = useAssignmentForms();
   const { data: workers = [] } = useWorkers();
   const createTransfer = useCreateTransfer();
   const reviewTransfer = useReviewTransfer();
@@ -67,8 +70,6 @@ export default function TransfersPage() {
   const pendingList = allTransfers.filter(t => t.status === 'pending');
   const activeFilters = [statusFilter, fromFilter, toFilter, itemFilter].filter(Boolean).length;
 
-  const selectedAssignment = allAssignments.find(a => a.id === form.sourceAssignmentId);
-
   // Workers who currently hold active assignments — the "FROM" dropdown for managers
   const fromWorkerOptions = [...new Map(
     allAssignments
@@ -76,11 +77,81 @@ export default function TransfersPage() {
       .map(a => [a.assignedToId, a.assignedTo])
   ).values()];
 
-  // Active assignments held by the selected FROM worker — the item dropdown source
-  const fromAssignments = allAssignments.filter(a => a.assignedToId === form.fromUserId);
+  /**
+   * A worker may only move stock that was issued to them on an assignment form
+   * (ASN) — everything else on the floor belongs to somebody else. The forms
+   * decide *which* items are offered; the assignment rows opened when a form is
+   * issued supply the rest, because the API only accepts an active assignment
+   * the sender holds as the transfer source.
+   */
+  const myIssuedAsn = useMemo(() => {
+    const formIds = new Set<string>();
+    const itemKeys = new Set<string>();
+    if (isManager || !user?.id) return { formIds, itemKeys };
+
+    for (const asn of assignmentForms as any[]) {
+      if (asn.status !== 'issued' || asn.assignedToId !== user.id) continue;
+      formIds.add(asn.id);
+      for (const line of asn.items || []) {
+        if (!(line.qtyIssued > 0)) continue;
+        if (line.itemId) itemKeys.add(norm(line.itemId));
+        if (line.itemCode) itemKeys.add(norm(line.itemCode));
+      }
+    }
+    return { formIds, itemKeys };
+  }, [assignmentForms, isManager, user?.id]);
+
+  // Items the create form may offer, each one grouped back to the assignments
+  // that make it transferable.
+  const transferableItems = useMemo(() => {
+    const source = isManager
+      // Managers act on a worker's behalf: whatever that worker currently holds.
+      ? allAssignments.filter(a => a.assignedToId === form.fromUserId)
+      // Assignments made before the form-id stamp existed won't carry it, so also
+      // match the item itself against the lines of the worker's issued forms.
+      : allAssignments.filter(a =>
+          a.assignedToId === user?.id && (
+            (a.assignmentFormId && myIssuedAsn.formIds.has(a.assignmentFormId)) ||
+            myIssuedAsn.itemKeys.has(norm(a.itemId)) ||
+            myIssuedAsn.itemKeys.has(norm(a.item?.sku))
+          ));
+
+    const byItem = new Map<string, any>();
+    for (const a of source) {
+      if (!a.itemId || !(a.quantity > 0)) continue;
+      const entry = byItem.get(a.itemId) || {
+        id: a.itemId,
+        name: a.item?.name || a.item?.sku || 'Item',
+        sku: a.item?.sku || '',
+        qty: 0,
+        assignments: [] as any[],
+      };
+      entry.qty += a.quantity;
+      entry.assignments.push(a);
+      byItem.set(a.itemId, entry);
+    }
+
+    // A request draws on a single assignment — the API validates the quantity
+    // against that one row — so the largest holding sets the per-request cap.
+    return [...byItem.values()].map(entry => {
+      const assignments = [...entry.assignments].sort((x, y) => y.quantity - x.quantity);
+      return { ...entry, assignments, maxPerRequest: assignments[0]?.quantity || 0 };
+    });
+  }, [allAssignments, isManager, form.fromUserId, user?.id, myIssuedAsn]);
+
+  const selectedItem = transferableItems.find(i => i.id === form.itemId);
+  const maxQty = selectedItem?.maxPerRequest || 999;
 
   // "TO" dropdown: all workers except the FROM worker
   const toWorkerOptions = (workers as any[]).filter(w => w.id !== form.fromUserId);
+
+  // A worker can only ever transfer out of their own holdings — keep FROM pinned
+  // to them even if `user` resolves after the first render.
+  useEffect(() => {
+    if (!isManager && user?.id) {
+      setForm(f => (f.fromUserId === user.id ? f : { ...f, fromUserId: user.id }));
+    }
+  }, [isManager, user?.id]);
 
   const openCreate = () => {
     setForm({
@@ -317,14 +388,15 @@ export default function TransfersPage() {
         footer={<>
           <button className="btn btn-ghost" onClick={() => setShowCreate(false)}>Cancel</button>
           <button className="btn btn-primary" onClick={handleCreate}
-            disabled={createTransfer.isPending || !form.fromUserId || !form.toUserId || !form.sourceAssignmentId || form.quantity < 1}>
+            disabled={createTransfer.isPending || !form.fromUserId || !form.toUserId || !form.sourceAssignmentId
+              || form.quantity < 1 || form.quantity > maxQty}>
             {createTransfer.isPending ? 'Submitting…' : 'Submit Request'}
           </button>
         </>}>
         <div style={{ background: 'var(--bg-3)', borderRadius: 'var(--radius)', padding: '12px 16px', fontSize: 12, color: 'var(--text-2)', lineHeight: 1.7 }}>
           {isManager
             ? 'Pick the worker who currently holds the item, the item from their active assignments, and the worker who will receive it.'
-            : 'Select an item from your inventory and the worker you want to transfer it to.'}
+            : 'Select an item issued to you on an assignment form (ASN) and the worker you want to transfer it to.'}
         </div>
         <div className="form-group">
           <label className="form-label">From worker {isManager ? '(current holder)' : ''} *</label>
@@ -350,20 +422,29 @@ export default function TransfersPage() {
         </div>
         <div className="form-group">
           <label className="form-label">Item to transfer *</label>
-          <select className="form-input" value={form.sourceAssignmentId}
+          <select className="form-input" value={form.itemId}
             disabled={!form.fromUserId}
             onChange={e => {
-              const a = allAssignments.find(x => x.id === e.target.value);
-              setForm({ ...form, sourceAssignmentId: e.target.value, itemId: a?.itemId || '', quantity: 1 });
+              const item = transferableItems.find(i => i.id === e.target.value);
+              setForm({
+                ...form,
+                itemId: e.target.value,
+                sourceAssignmentId: item?.assignments[0]?.id || '',
+                quantity: 1,
+              });
             }}>
-            <option value="">{form.fromUserId ? 'Select item…' : 'Select a "from" worker first'}</option>
-            {fromAssignments.map((a: any) => (
-              <option key={a.id} value={a.id}>{a.item?.name} — {a.quantity} assigned</option>
+            <option value="">{form.fromUserId ? 'Select item to transfer…' : 'Select a "from" worker first'}</option>
+            {transferableItems.map((item: any) => (
+              <option key={item.id} value={item.id}>
+                {item.name}{item.sku ? ` (${item.sku})` : ''} — {item.qty} available
+              </option>
             ))}
           </select>
-          {form.fromUserId && fromAssignments.length === 0 && (
+          {form.fromUserId && transferableItems.length === 0 && (
             <p style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 4 }}>
-              This worker has no active assignments to transfer.
+              {isManager
+                ? 'This worker has no active assignments to transfer.'
+                : 'You have no items issued to you on an assignment form (ASN) yet.'}
             </p>
           )}
         </div>
@@ -379,12 +460,21 @@ export default function TransfersPage() {
         <div className="form-group">
           <label className="form-label">
             Quantity *
-            {selectedAssignment && <span style={{ color: 'var(--text-3)', marginLeft: 8 }}>max {selectedAssignment.quantity}</span>}
+            {selectedItem && <span style={{ color: 'var(--text-3)', marginLeft: 8 }}>max {maxQty}</span>}
           </label>
-          <input type="number" min={1} max={selectedAssignment?.quantity || 999}
+          <input type="number" min={1} max={maxQty}
             className="form-input" value={form.quantity}
-            onChange={e => setForm({ ...form, quantity: +e.target.value })}
+            onChange={e => setForm({ ...form, quantity: Math.min(+e.target.value || 1, maxQty) })}
             disabled={!form.sourceAssignmentId} />
+          {selectedItem && (
+            <p style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 4 }}>
+              {isManager
+                ? `This worker holds ${selectedItem.qty} pcs of ${selectedItem.name}`
+                : `You have ${selectedItem.qty} pcs available to transfer`}
+              {selectedItem.qty > maxQty &&
+                ` — up to ${maxQty} per request, held across ${selectedItem.assignments.length} separate issues`}
+            </p>
+          )}
         </div>
         <div className="form-group">
           <label className="form-label">Reason (optional)</label>

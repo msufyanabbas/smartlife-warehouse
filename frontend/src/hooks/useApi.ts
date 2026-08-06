@@ -506,7 +506,10 @@ const onDocumentSaved = (qc: ReturnType<typeof useQueryClient>, resource: string
   // The pending feed is a separate key, not a child of ['mic'], so a save that
   // submits or withdraws a form has to name it or the manager's alert goes stale.
   if (resource === 'mic') qc.invalidateQueries({ queryKey: ['mic-pending'] });
-  if (resource === 'assignment-forms') {
+  // Completing a transfer takes stock off the issuing worker's assignment rows —
+  // and opens one on the receiving worker — so it moves the same assignment-derived
+  // caches an issue does, including the worker's own "my inventory" view.
+  if (resource === 'assignment-forms' || resource === 'transfer-forms') {
     qc.invalidateQueries({ queryKey: ['assignments'] });
     qc.invalidateQueries({ queryKey: ['assignments-history'] });
     qc.invalidateQueries({ queryKey: ['my-inventory'] });

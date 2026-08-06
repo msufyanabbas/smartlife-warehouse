@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { ArrowLeft, ArrowLeftRight, Eye, Plus, Printer, Save } from 'lucide-react';
+import { ArrowLeft, ArrowLeftRight, CheckCircle, Eye, Plus, Printer, Save } from 'lucide-react';
 import { format } from 'date-fns';
 import toast from 'react-hot-toast';
 import {
@@ -18,6 +18,7 @@ import {
 import {
   fullName, orUndefined, printDate, printSerials, toDateInput, today, uniqueSorted,
 } from '../../components/documents/formUtils';
+import { useAuth } from '../../contexts/AuthContext';
 import type { TransferForm, User } from '../../types';
 
 const MIN_ROWS = 15;
@@ -210,6 +211,7 @@ function TransferEditor({ id, doc, onClose, onCreated }: {
   onClose: () => void;
   onCreated: (id: string) => void;
 }) {
+  const { user } = useAuth();
   const { data: users = [] } = useUsers();
   const { data: inventory = [] } = useInventory();
   const { data: assignmentForms = [] } = useAssignmentForms();
@@ -227,6 +229,7 @@ function TransferEditor({ id, doc, onClose, onCreated }: {
   const stock = inventory as any[];
   const sites = uniqueSorted(stock.flatMap(i => [i.projectName, i.schemeNo]));
   const approvers = (users as User[]).filter(u => u.role === 'admin' || u.role === 'manager');
+  const isManager = user?.role === 'admin' || user?.role === 'manager';
 
   const nameOf = (userId: string) => {
     const match = (users as User[]).find(u => u.id === userId);
@@ -367,9 +370,25 @@ function TransferEditor({ id, doc, onClose, onCreated }: {
           <button className="btn btn-ghost btn-sm" onClick={() => save('approved')} disabled={saving}>
             <Save size={14} /> Approve
           </button>
-          <button className="btn btn-primary btn-sm" onClick={() => save('completed')} disabled={saving}>
-            <Save size={14} /> Save &amp; Complete
-          </button>
+          {/*
+            Completing is the step that moves stock — it takes the quantity off
+            the issuing worker and books it back in — so it is gated to a manager
+            and confirmed, and it drops away once the form is already completed
+            rather than offering to re-run a move the API would ignore anyway.
+          */}
+          {isManager && (form.status === 'draft' || form.status === 'approved') && (
+            <button
+              className="btn btn-primary btn-sm"
+              onClick={() => {
+                if (confirm('Mark this transfer as completed? This will update inventory quantities.')) {
+                  save('completed');
+                }
+              }}
+              disabled={saving}
+            >
+              <CheckCircle size={14} /> Complete Transfer
+            </button>
+          )}
         </div>
       </div>
 

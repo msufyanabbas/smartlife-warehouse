@@ -9,7 +9,10 @@ import {
   TransferFormItemDto,
   UpdateTransferFormDto,
 } from './dto/transfer-form.dto';
+import { Assignment, AssignmentStatus } from '../assignments/entities/assignment.entity';
 import { InventoryItem } from '../inventory/entities/inventory-item.entity';
+import { User } from '../users/entities/user.entity';
+import { Role } from '../common/enums/role.enum';
 import { generateRefNumber } from '../common/utils/generate-ref-number';
 import { joinSerials } from '../common/utils/serial-numbers';
 
@@ -20,6 +23,10 @@ export class TransferFormsService {
     private formRepository: Repository<TransferForm>,
     @InjectRepository(InventoryItem)
     private inventoryRepository: Repository<InventoryItem>,
+    @InjectRepository(Assignment)
+    private assignmentRepository: Repository<Assignment>,
+    @InjectRepository(User)
+    private userRepository: Repository<User>,
   ) {}
 
   async findAll() {
@@ -64,20 +71,26 @@ export class TransferFormsService {
 
   /**
    * Completing a form is the primary way stock changes location. Each line's
-   * inventory row is re-homed to the destination project/warehouse — quantities
-   * are untouched (stock moved, not consumed) — and stamped with the form id.
+   * inventory row is re-homed to the destination project/warehouse and stamped
+   * with the form id, and — when the stock is coming off a worker — the quantity
+   * moves out of `assigned` too.
+   *
+   * Who is issuing decides whether any quantity moves at all. A manager or
+   * storekeeper transfers warehouse stock between sites: nothing was ever booked
+   * out to a person, so only the location changes. A worker transfers what was
+   * assigned to them, which either goes back on the shelf (assigned → available)
+   * or straight to another worker (assigned unchanged, holder re-pointed).
    */
   private async applyTransfer(form: TransferForm) {
-    for (const line of form.items) {
-      if (line.qtyToTransfer <= 0) continue;
+    const issuerIsWorker = await this.isWorker(form.issuedById);
+    // Only meaningful when a worker is issuing — a "Received By" storekeeper on a
+    // warehouse-to-warehouse transfer is a signature, not a new holder.
+    const receiverIsWorker = issuerIsWorker && await this.isWorker(form.receivedById);
 
-      // Prefer the explicit inventory link; fall back to SKU at the origin.
-      const item = line.itemId
-        ? await this.inventoryRepository.findOne({ where: { id: line.itemId } })
-        : await this.inventoryRepository.findOne({
-            where: { sku: line.itemCode?.trim() },
-            order: { createdAt: 'DESC' },
-          });
+    for (const line of form.items ?? []) {
+      if (!(line.qtyToTransfer > 0)) continue;
+
+      const item = await this.findLineItem(line);
       if (!item) continue;
 
       // The destination site is keyed on schemeNo (what the stock report and the
@@ -85,8 +98,105 @@ export class TransferFormsService {
       if (form.toProjectSite) item.schemeNo = form.toProjectSite;
       if (form.toWarehouse) item.location = form.toWarehouse;
       item.transferFormId = form.id;
+
+      if (issuerIsWorker) {
+        await this.releaseFromWorker(
+          item.id,
+          form.issuedById,
+          line.qtyToTransfer,
+          receiverIsWorker ? AssignmentStatus.TRANSFERRED : AssignmentStatus.RETURNED,
+        );
+
+        if (receiverIsWorker) {
+          // Still out with a person, just a different one — the totals on the
+          // inventory row are unchanged.
+          await this.assignToWorker(item.id, form.receivedById, line.qtyToTransfer, form);
+        } else {
+          // Back on the shelf. Clamped to what is actually assigned so the
+          // `total = available + assigned + used` invariant survives a line that
+          // over-states its quantity.
+          const moved = Math.min(line.qtyToTransfer, item.assignedQuantity);
+          item.assignedQuantity -= moved;
+          item.availableQuantity += moved;
+        }
+      }
+
       await this.inventoryRepository.save(item);
     }
+  }
+
+  /** Prefer the explicit inventory link; fall back to SKU at the origin. */
+  private async findLineItem(line: TransferFormLineItem) {
+    if (line.itemId) {
+      const byId = await this.inventoryRepository.findOne({ where: { id: line.itemId } });
+      if (byId) return byId;
+    }
+
+    const sku = line.itemCode?.trim();
+    if (!sku) return null;
+
+    return this.inventoryRepository.findOne({
+      where: { sku },
+      order: { createdAt: 'DESC' },
+    });
+  }
+
+  private async isWorker(userId?: string) {
+    if (!userId) return false;
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+    return user?.role === Role.WORKER;
+  }
+
+  /**
+   * Takes `qty` off the issuing worker's active assignments — the rows the stock
+   * report reads back, so inventory moving without them would leave the item
+   * showing as still held. Mirrors the return-request flow: an assignment the
+   * transfer consumes entirely is closed, a partly consumed one is reduced.
+   *
+   * Oldest first, and it stops early if the assignments do not cover the line:
+   * stock that predates these rows has none to spend.
+   */
+  private async releaseFromWorker(
+    itemId: string,
+    workerId: string,
+    qty: number,
+    closeAs: AssignmentStatus,
+  ) {
+    const rows = await this.assignmentRepository.find({
+      where: { itemId, assignedToId: workerId, status: AssignmentStatus.ACTIVE },
+      order: { createdAt: 'ASC' },
+    });
+
+    let remaining = qty;
+    for (const row of rows) {
+      if (remaining <= 0) break;
+
+      const take = Math.min(remaining, row.quantity);
+      if (take === row.quantity) {
+        row.status = closeAs;
+        // The report reconstructs holdings from timestamps, so a closed row needs
+        // the date it stopped counting — whether it went back or moved on.
+        row.returnedAt = new Date();
+      } else {
+        row.quantity -= take;
+      }
+
+      await this.assignmentRepository.save(row);
+      remaining -= take;
+    }
+  }
+
+  /** Opens the receiving worker's assignment. `TRF:` mirrors the ASN convention. */
+  private async assignToWorker(itemId: string, workerId: string, qty: number, form: TransferForm) {
+    const assignment = this.assignmentRepository.create({
+      itemId,
+      assignedToId: workerId,
+      assignedById: form.approvedById || form.issuedById || undefined,
+      quantity: qty,
+      status: AssignmentStatus.ACTIVE,
+      notes: `TRF: ${form.transferNo}`,
+    });
+    await this.assignmentRepository.save(assignment);
   }
 }
 

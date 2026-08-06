@@ -29,7 +29,7 @@ const COLUMNS: LineColumn[] = [
   { key: 'unit', label: 'Unit', width: '8%' },
   {
     key: 'stockQty', label: 'Stock Qty (From)', type: 'readonly', width: '11%',
-    hint: 'Quantity the selected "Issued By" person can send',
+    hint: 'Quantity currently assigned to this person (available to transfer)',
     // Working figure only — see the assignment form's Stock Available column.
     hideOnPrint: true,
   },
@@ -257,36 +257,39 @@ function TransferEditor({ id, doc, onClose, onCreated }: {
     if (!issuedByIsWorker) return stock;
 
     const byId = new Map(stock.map(i => [i.id, i]));
+    const bySku = new Map(stock.map(i => [String(i.sku ?? '').trim().toLowerCase(), i]));
     const held = new Map<string, any>();
 
     for (const asn of assignmentForms as any[]) {
       if (asn.status !== 'issued' || asn.assignedToId !== form.issuedById) continue;
       for (const line of asn.items ?? []) {
-        // An issued line always names an inventory item — the backend refuses to
-        // issue one that doesn't — and that id is what makes the pick saveable.
-        if (!line.itemId || !(line.qtyIssued > 0)) continue;
+        const code = String(line.itemCode ?? '').trim().toLowerCase();
+        if (!(line.qtyIssued > 0) || (!line.itemId && !code)) continue;
 
-        const already = held.get(line.itemId);
+        const key = line.itemId || code;
+        const already = held.get(key);
         if (already) {
           // The same item issued on more than one of their forms.
           already.availableQuantity += line.qtyIssued;
           continue;
         }
 
-        const item = byId.get(line.itemId);
-        held.set(line.itemId, item
-          ? { ...item, availableQuantity: line.qtyIssued }
-          // The inventory row is gone; the ASN line still describes it well
-          // enough to pick, and its id still saves.
-          : {
-              id: line.itemId,
-              name: line.itemDescription || line.itemCode || 'Item',
-              sku: line.itemCode || '',
-              serialNumber: line.serialNumber || '',
-              isActive: true,
-              availableQuantity: line.qtyIssued,
-              product: { unit: line.unit || '' },
-            });
+        // Newer lines carry the inventory id; older ones only ever had the code.
+        const item = byId.get(line.itemId) ?? bySku.get(code);
+        held.set(key, {
+          ...(item ?? {}),
+          id: line.itemId || item?.id || key,
+          name: line.itemDescription || item?.name || line.itemCode || 'Item',
+          sku: line.itemCode || item?.sku || '',
+          serialNumber: line.serialNumber || item?.serialNumber || '',
+          isActive: true,
+          // What this person was issued — not the inventory row's
+          // `assignedQuantity`, which totals every worker holding the item.
+          availableQuantity: line.qtyIssued,
+          product: { unit: line.unit || item?.product?.unit || '' },
+          // No inventory row and no id on the line: offer it, but as free text.
+          unlinked: !line.itemId && !item,
+        });
       }
     }
 

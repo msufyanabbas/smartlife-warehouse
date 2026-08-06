@@ -16,6 +16,12 @@ interface StockItem {
   serialNumber?: string; schemeNo?: string; projectName?: string;
   availableQuantity: number; isActive: boolean;
   product?: { unit?: string };
+  /**
+   * Set on an `availableItems` entry with no inventory row behind it, so its
+   * placeholder `id` is never written to the line — the backend takes `itemId`
+   * as a real inventory uuid or not at all.
+   */
+  unlinked?: boolean;
 }
 
 // ── Item code autocomplete ─────────────────────────────────────────────────
@@ -58,7 +64,10 @@ function ItemCodePicker({
 
   const q = query.trim().toLowerCase();
   const stockOptions = (availableItems ?? (stock as StockItem[]))
-    .filter(i => i.isActive && (stockOf(i) > 0 || i.id === selectedId))
+    // A restricted list has already decided what may be offered, and its
+    // quantities are not warehouse balances — stock assigned out to a worker
+    // reads zero on the shelf, which is exactly the case it exists to cover.
+    .filter(i => !!availableItems || (i.isActive && (stockOf(i) > 0 || i.id === selectedId)))
     .filter(i => !filterStock || filterStock(i))
     .filter(i => !usedIds.includes(i.id) || i.id === selectedId)
     .filter(i => !q || i.sku.toLowerCase().includes(q) || i.name.toLowerCase().includes(q))
@@ -83,7 +92,8 @@ function ItemCodePicker({
     setQuery(i.sku);
     setOpen(false);
     onPick({
-      itemId: i.id,
+      // An unlinked entry keeps its code and description but stays free text.
+      itemId: i.unlinked ? undefined : i.id,
       itemCode: i.sku,
       itemDescription: i.name,
       unit: i.product?.unit || '',

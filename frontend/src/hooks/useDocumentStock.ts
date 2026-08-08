@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { useGrnList, useAssignmentForms } from './useApi';
+import { useGrnList, useAssignmentForms, useRtnList } from './useApi';
 
 interface GrnLine { itemCode?: string; receivedQty?: number }
 interface GrnDoc { status: string; items?: GrnLine[] }
@@ -7,21 +7,24 @@ interface GrnDoc { status: string; items?: GrnLine[] }
 interface AsnLine { itemCode?: string; qtyIssued?: number }
 interface AsnDoc { status: string; items?: AsnLine[] }
 
+interface RtnLine { itemCode?: string; qtyReturned?: number }
+interface RtnDoc { status: string; items?: RtnLine[] }
+
 interface StockLike { sku?: string; availableQuantity: number }
 
 /**
  * On-hand stock per SKU, derived from the documents rather than read off the
  * inventory row: everything completed GRNs receipted, less everything issued
- * ASN forms handed out.
+ * ASN forms handed out, plus everything approved RTN documents brought back.
  *
  * This is the same figure the Stock Report's Closing column shows, so the two
  * screens agree by construction instead of by coincidence.
  *
  * Two things it does not see, both of which make it read low:
  *
- * - Returns. Handing stock back adjusts inventory but never writes back to the
- *   ASN that issued it, so `qtyIssued` is cumulative-ever-issued. Stock issued,
- *   returned and reshelved still counts as gone.
+ * - Hand-backs recorded outside an RTN. An ad-hoc return request adjusts
+ *   inventory but never writes back to the ASN that issued it, so stock issued,
+ *   returned that way and reshelved still counts as gone.
  * - Stock added outside a GRN. `InventoryService.create()` and `bulkCreate()`
  *   both add quantity with no document behind it. A SKU with no GRN line at all
  *   is absent from this map and falls back to the inventory row, but a SKU with
@@ -33,6 +36,7 @@ interface StockLike { sku?: string; availableQuantity: number }
 export function useDocumentStock() {
   const { data: grnData = [] } = useGrnList();
   const { data: assignmentFormsData = [] } = useAssignmentForms();
+  const { data: rtnData = [] } = useRtnList();
 
   const availableBySku = useMemo(() => {
     const map = new Map<string, number>();
@@ -57,9 +61,20 @@ export function useDocumentStock() {
       }
     }
 
+    for (const rtn of rtnData as RtnDoc[]) {
+      // Only an approved return has been booked back onto the shelf; anything
+      // earlier is still out with the worker.
+      if (rtn.status !== 'approved') continue;
+      for (const line of rtn.items ?? []) {
+        if (!line.itemCode?.trim() || !line.qtyReturned) continue;
+        const sku = line.itemCode.trim().toLowerCase();
+        map.set(sku, (map.get(sku) ?? 0) + line.qtyReturned);
+      }
+    }
+
     for (const [sku, qty] of map) map.set(sku, Math.max(0, qty));
     return map;
-  }, [grnData, assignmentFormsData]);
+  }, [grnData, assignmentFormsData, rtnData]);
 
   /** Document-derived stock for an item, falling back to its row when no GRN names its SKU. */
   const resolveStock = useMemo(

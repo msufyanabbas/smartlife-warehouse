@@ -90,10 +90,12 @@ export const useApprovers = () =>
     queryFn: () => api.get('/users/approvers').then(r => r.data.data),
   });
 
-export const useWorkers = () =>
+/** Manager-only feed — pass `false` on a screen a worker can also open. */
+export const useWorkers = (enabled = true) =>
   useQuery({
     queryKey: ['workers'],
     queryFn: () => api.get('/users/workers').then(r => r.data.data),
+    enabled,
   });
 
 export const useCreateUser = () => {
@@ -506,10 +508,13 @@ const onDocumentSaved = (qc: ReturnType<typeof useQueryClient>, resource: string
   // The pending feed is a separate key, not a child of ['mic'], so a save that
   // submits or withdraws a form has to name it or the manager's alert goes stale.
   if (resource === 'mic') qc.invalidateQueries({ queryKey: ['mic-pending'] });
+  if (resource === 'rtn') qc.invalidateQueries({ queryKey: ['rtn-pending'] });
   // Completing a transfer takes stock off the issuing worker's assignment rows —
   // and opens one on the receiving worker — so it moves the same assignment-derived
   // caches an issue does, including the worker's own "my inventory" view.
-  if (resource === 'assignment-forms' || resource === 'transfer-forms') {
+  // Approving a return puts the quantity back on the shelf and closes the
+  // worker's assignment rows, so it moves the same caches from the other side.
+  if (resource === 'assignment-forms' || resource === 'transfer-forms' || resource === 'rtn') {
     qc.invalidateQueries({ queryKey: ['assignments'] });
     qc.invalidateQueries({ queryKey: ['assignments-history'] });
     qc.invalidateQueries({ queryKey: ['my-inventory'] });
@@ -654,5 +659,54 @@ export const useReviewMic = () => {
       toast.success(vars.action === 'approve' ? 'MIC approved ✓' : 'MIC rejected');
     },
     onError: documentError('Failed to review MIC'),
+  });
+};
+
+// Return documents (RTN)
+export const useRtnList = () =>
+  useQuery({ queryKey: ['rtn'], queryFn: () => listDocuments('rtn') });
+
+export const useRtn = (id?: string) =>
+  useQuery({ queryKey: ['rtn', id], queryFn: () => getDocument('rtn', id), enabled: !!id });
+
+export const useCreateRtn = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: any) => api.post('/rtn', data).then(r => r.data.data),
+    onSuccess: () => onDocumentSaved(qc, 'rtn'),
+    onError: documentError('Failed to create return document'),
+  });
+};
+
+export const useUpdateRtn = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: any }) =>
+      api.put(`/rtn/${id}`, data).then(r => r.data.data),
+    onSuccess: () => onDocumentSaved(qc, 'rtn'),
+    onError: documentError('Failed to save return document'),
+  });
+};
+
+/** Drives the approval alerts, so it polls the way the other pending feeds do. */
+export const usePendingRtn = (enabled = true) =>
+  useQuery({
+    queryKey: ['rtn-pending'],
+    queryFn: () => api.get('/rtn/pending').then(r => r.data.data),
+    refetchInterval: 30000,
+    enabled,
+  });
+
+export const useReviewRtn = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, action, rejectionReason }: {
+      id: string; action: 'approve' | 'reject'; rejectionReason?: string;
+    }) => api.patch(`/rtn/${id}/review`, { action, rejectionReason }).then(r => r.data.data),
+    onSuccess: (_, vars) => {
+      onDocumentSaved(qc, 'rtn');
+      toast.success(vars.action === 'approve' ? 'Return approved ✓' : 'Return rejected');
+    },
+    onError: documentError('Failed to review return document'),
   });
 };

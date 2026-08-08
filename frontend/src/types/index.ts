@@ -255,6 +255,41 @@ export interface MicLineItem {
   itemId?: string;
 }
 
+export type RtnItemCondition = 'Good' | 'Damaged' | 'Expired' | 'Other';
+export type RtnStatus = 'draft' | 'pending_approval' | 'approved' | 'rejected';
+
+export interface RtnDocument {
+  id: string;
+  rtnNo: string;
+  date?: string;
+  returnedBy?: User;
+  returnedById?: string;
+  receivedBy?: User;
+  receivedById?: string;
+  projectSite?: string;
+  warehouseLocation?: string;
+  notes?: string;
+  status: RtnStatus;
+  approvedBy?: User;
+  approvedById?: string;
+  approvedAt?: string;
+  rejectionReason?: string;
+  items: RtnLineItem[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RtnLineItem {
+  itemCode: string;
+  itemDescription: string;
+  unit: string;
+  qtyReturned: number;
+  serialNumbers: string;
+  condition: RtnItemCondition;
+  reason: string;
+  itemId?: string;
+}
+
 export type ItemRequestStatus = 'pending' | 'approved' | 'rejected' | 'cancelled';
 
 export interface ItemRequest {

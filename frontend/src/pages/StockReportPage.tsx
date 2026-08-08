@@ -4,7 +4,9 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { BarChart2, ClipboardCheck, Download, FileDown, Search, Filter } from 'lucide-react';
 import { format, startOfMonth, endOfMonth, subMonths } from 'date-fns';
-import { useInventory, useItemUsage, useGrnList, useAssignmentForms } from '../hooks/useApi';
+import {
+  useInventory, useItemUsage, useGrnList, useAssignmentForms, useRtnList,
+} from '../hooks/useApi';
 import MultiSelect from '../components/MultiSelect';
 import SerialNumbers from '../components/SerialNumbers';
 import AssignedUsedReport from './AssignedUsedReport';
@@ -52,6 +54,15 @@ interface AssignmentFormLine {
 interface AssignmentFormDocument {
   id: string; assignmentNo: string; status: string;
   items?: AssignmentFormLine[];
+}
+
+interface RtnLine {
+  itemCode?: string; qtyReturned?: number; itemId?: string;
+}
+
+interface RtnDocumentRow {
+  id: string; rtnNo: string; status: string;
+  items?: RtnLine[];
 }
 
 interface StockRow {
@@ -129,6 +140,7 @@ function StockMovementReport() {
   const { data: usageData = [] } = useItemUsage();
   const { data: grnData = [] } = useGrnList();
   const { data: assignmentFormsData = [] } = useAssignmentForms();
+  const { data: rtnData = [] } = useRtnList();
 
   const today = new Date().toISOString().split('T')[0];
   const [dateFrom, setDateFrom] = useState(format(startOfMonth(new Date()), 'yyyy-MM-dd'));
@@ -141,6 +153,7 @@ function StockMovementReport() {
   const usage = usageData as UsageRecord[];
   const grns = grnData as GrnDocument[];
   const assignmentForms = assignmentFormsData as AssignmentFormDocument[];
+  const rtns = rtnData as RtnDocumentRow[];
 
   const schemeOptions = useMemo(() => [...new Set(list.map(i => i.schemeNo).filter(Boolean))].sort() as string[], [list]);
   const categoryOptions = useMemo(() => [...new Set(list.map(i => i.category).filter(Boolean))].sort() as string[], [list]);
@@ -256,6 +269,33 @@ function StockMovementReport() {
     return { byItemId, bySkuUnlinked };
   }, [assignmentForms]);
 
+  /**
+   * The other half of that hand-out: what approved RTN documents brought back.
+   *
+   * Keyed the same two ways as `asnIssued`, and for the same reason — a line
+   * normally names its inventory row outright, and one that only carries a SKU
+   * falls back to the SKU map. Only approved returns count: a draft or a return
+   * awaiting a manager is stock the worker still holds.
+   */
+  const rtnReturned = useMemo(() => {
+    const byItemId = new Map<string, number>();
+    const bySkuUnlinked = new Map<string, number>();
+    for (const rtn of rtns) {
+      if (rtn.status !== 'approved') continue;
+      for (const line of rtn.items ?? []) {
+        const qty = line.qtyReturned ?? 0;
+        if (qty <= 0) continue;
+        if (line.itemId) {
+          byItemId.set(line.itemId, (byItemId.get(line.itemId) ?? 0) + qty);
+        } else if (line.itemCode?.trim()) {
+          const sku = matchKey(line.itemCode);
+          bySkuUnlinked.set(sku, (bySkuUnlinked.get(sku) ?? 0) + qty);
+        }
+      }
+    }
+    return { byItemId, bySkuUnlinked };
+  }, [rtns]);
+
   /** Consumption logged against each row, kept with its date so a period can be cut out of it. */
   const usageByItem = useMemo(() => {
     const byItem = new Map<string, { date: Date; qty: number }[]>();
@@ -316,12 +356,20 @@ function StockMovementReport() {
           .filter(r => r.date >= from && r.date <= to)
           .reduce((s, r) => s + r.qty, 0);
 
-        // Assigned — every hand-out on an issued ASN, across all time rather
-        // than period-scoped, matching how the column has always read.
+        // Assigned — every hand-out on an issued ASN less everything an approved
+        // RTN brought back, across all time rather than period-scoped, matching
+        // how the column has always read.
+        //
+        // Both key paths are added on the return side, unlike the fall-through
+        // on the issue side: a linked and an unlinked line are different lines,
+        // and missing one of them would leave stock reading as still out.
         const sku = matchKey(item.sku);
-        const assigned = asnIssued.byItemId.get(item.id)
+        const issuedOnAsn = asnIssued.byItemId.get(item.id)
           ?? (ambiguousSkus.has(sku) ? undefined : asnIssued.bySkuUnlinked.get(sku))
           ?? 0;
+        const returnedOnRtn = (rtnReturned.byItemId.get(item.id) ?? 0)
+          + (ambiguousSkus.has(sku) ? 0 : (rtnReturned.bySkuUnlinked.get(sku) ?? 0));
+        const assigned = Math.max(0, issuedOnAsn - returnedOnRtn);
 
         // Issued — consumption logged inside the period. Reported, but not
         // subtracted below: consuming stock requires holding it first
@@ -332,12 +380,13 @@ function StockMovementReport() {
           .reduce((s, u) => s + u.qty, 0);
 
         // Closing — what the documents say should be on the shelf: everything
-        // received, less everything handed out.
+        // received, less everything still out with a worker.
         //
-        // Floored at zero because `assigned` is cumulative while a return is
-        // recorded only as an inventory movement, never written back to the ASN
-        // that issued it. Stock handed out, returned and handed out again
-        // therefore counts twice here and drives the figure negative. A row
+        // Floored at zero because only a formal RTN document is netted off
+        // above. A hand-back recorded the older way — an ad-hoc return request,
+        // which adjusts inventory but is never written back to the ASN that
+        // issued it — still counts as gone, so stock handed out, given back and
+        // handed out again counts twice and drives the figure negative. A row
         // reading 0 with a large Assigned is that, not an empty shelf.
         const closing = Math.max(0, opening + received - assigned);
 
@@ -356,7 +405,7 @@ function StockMovementReport() {
           closing,
         };
       });
-  }, [list, usageByItem, receiptsByItem, asnIssued, ambiguousSkus, dateFrom, dateTo, search, schemeFilters, categoryFilters]);
+  }, [list, usageByItem, receiptsByItem, asnIssued, rtnReturned, ambiguousSkus, dateFrom, dateTo, search, schemeFilters, categoryFilters]);
 
   // Totals
   const totals = useMemo(() => ({
@@ -366,6 +415,9 @@ function StockMovementReport() {
     issued: reportRows.reduce((s, r) => s + r.issued, 0),
     closing: reportRows.reduce((s, r) => s + r.closing, 0),
   }), [reportRows]);
+
+  /** Whether any approved return has been documented, which is what makes the Assigned column a net figure. */
+  const hasRtnActivity = rtnReturned.byItemId.size > 0 || rtnReturned.bySkuUnlinked.size > 0;
 
   const setQuickRange = (range: typeof QUICK_RANGES[0]) => {
     const { from, to } = range.getValue();
@@ -632,19 +684,29 @@ function StockMovementReport() {
       margin: { top: 50, left: marginL, right: marginR, bottom: 12 },
     });
 
-    // ── Filters note if active ──
+    // ── Notes under the table ──
+    const notes: string[] = [];
+
+    // How the Assigned column was arrived at, but only once returns are actually
+    // being documented — on a site with no RTN yet it would explain a subtraction
+    // that never happened.
+    if (hasRtnActivity) {
+      notes.push('Assigned = total issued via ASN minus returned via RTN documents.');
+    }
+
     const filterParts = [];
     if (schemeFilters.length > 0) filterParts.push(`Schemes: ${schemeFilters.join(', ')}`);
     if (categoryFilters.length > 0) filterParts.push(`Categories: ${categoryFilters.join(', ')}`);
     if (search) filterParts.push(`Search: "${search}"`);
     if (dateFrom || dateTo) filterParts.push(`Date: ${dateFrom || 'All'} → ${dateTo || 'Today'}`);
+    if (filterParts.length > 0) notes.push(`Filters applied: ${filterParts.join(' · ')}`);
 
-    if (filterParts.length > 0) {
+    if (notes.length > 0) {
       // autoTable stamps this on the doc but does not augment jsPDF's types.
       const finalY = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 4;
       doc.setFontSize(7);
       doc.setTextColor(150, 150, 150);
-      doc.text(`Filters applied: ${filterParts.join(' · ')}`, marginL, finalY);
+      notes.forEach((note, index) => doc.text(note, marginL, finalY + index * 4));
     }
 
     // Save
@@ -826,7 +888,7 @@ function StockMovementReport() {
       {/* Legend */}
       <div style={{ marginTop: 16, padding: '12px 16px', background: 'var(--bg-2)', borderRadius: 'var(--radius)', border: '1px solid var(--border)', fontSize: 12, color: 'var(--text-3)' }}>
         <strong style={{ color: 'var(--text-2)' }}>How it works:</strong>
-        {' '}Every figure is derived from documents, not from live inventory balances. Opening = received via GRN before this period · Received = received via GRN in this period · Assigned = total handed out on Assignment Forms, all time · Issued = consumed via the usage log in this period · <strong style={{ color: 'var(--text-2)' }}>Closing = Opening + Received − Assigned</strong>. Issued is shown but not subtracted — stock has to be assigned before it can be consumed, so it already left the warehouse under Assigned. Only items with GRN history appear, and Closing will not always match the Inventory page.
+        {' '}Every figure is derived from documents, not from live inventory balances. Opening = received via GRN before this period · Received = received via GRN in this period · Assigned = total handed out on Assignment Forms minus what approved Return Documents (RTN) brought back, all time · Issued = consumed via the usage log in this period · <strong style={{ color: 'var(--text-2)' }}>Closing = Opening + Received − Assigned</strong>. Issued is shown but not subtracted — stock has to be assigned before it can be consumed, so it already left the warehouse under Assigned. Only items with GRN history appear, and Closing will not always match the Inventory page.
       </div>
     </div>
   );

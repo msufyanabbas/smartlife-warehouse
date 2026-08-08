@@ -1,16 +1,16 @@
 import { useMemo, type ReactNode } from 'react';
 import {
   Package, ClipboardList, AlertCircle, TrendingUp,
-  ClipboardCheck, CheckCircle,
+  ClipboardCheck, CheckCircle, RotateCcw,
 } from 'lucide-react';
 import {
-  useAssignments, usePendingTransfers, usePendingMic,
-  useGrnList, useAssignmentForms, useMicList,
+  useAssignments, usePendingTransfers, usePendingMic, usePendingRtn,
+  useGrnList, useAssignmentForms, useMicList, useRtnList,
 } from '../hooks/useApi';
 import { useAuth } from '../contexts/AuthContext';
 import { Link } from 'react-router-dom';
 import type {
-  TransferRequest, Assignment, MicDocument, GrnDocument, AssignmentForm,
+  TransferRequest, Assignment, MicDocument, GrnDocument, AssignmentForm, RtnDocument,
 } from '../types';
 import { formatDistanceToNow } from 'date-fns';
 
@@ -29,12 +29,15 @@ export default function DashboardPage() {
   const { data: assignments } = useAssignments();
   const { data: pending } = usePendingTransfers();
   const { data: pendingMic } = usePendingMic(isManager);
+  const { data: pendingRtn } = usePendingRtn(isManager);
   const { data: grnData = [] } = useGrnList();
   const { data: assignmentFormsData = [] } = useAssignmentForms();
   const { data: micData = [] } = useMicList();
+  const { data: rtnData = [] } = useRtnList();
 
   const pendingCount = Array.isArray(pending) ? pending.length : 0;
   const pendingMicList: MicDocument[] = Array.isArray(pendingMic) ? pendingMic : [];
+  const pendingRtnList: RtnDocument[] = Array.isArray(pendingRtn) ? pendingRtn : [];
   const assignmentList: Assignment[] = Array.isArray(assignments) ? assignments : [];
 
   const completedGrns = useMemo(
@@ -45,33 +48,46 @@ export default function DashboardPage() {
     () => (assignmentFormsData as AssignmentForm[]).filter(form => form.status === 'issued'),
     [assignmentFormsData],
   );
+  const approvedRtns = useMemo(
+    () => (rtnData as RtnDocument[]).filter(rtn => rtn.status === 'approved'),
+    [rtnData],
+  );
 
   const docStats = useMemo(() => {
     const totalReceived = completedGrns
       .flatMap(grn => grn.items ?? [])
       .reduce((sum, line) => sum + (line.receivedQty || 0), 0);
 
-    const totalAssigned = issuedForms
+    const totalIssued = issuedForms
       .flatMap(form => form.items ?? [])
       .reduce((sum, line) => sum + (line.qtyIssued || 0), 0);
+
+    // What approved return documents brought back off the workers, netted off
+    // below so this page and the stock report read the same Assigned figure.
+    const totalReturned = approvedRtns
+      .flatMap(rtn => rtn.items ?? [])
+      .reduce((sum, line) => sum + (line.qtyReturned || 0), 0);
 
     const totalInstalled = (micData as MicDocument[])
       .filter(mic => mic.status === 'approved')
       .flatMap(mic => mic.items ?? [])
       .reduce((sum, line) => sum + (line.qtyInstalled || 0), 0);
 
+    const totalAssigned = Math.max(0, totalIssued - totalReturned);
+
     return {
       totalReceived,
       totalAssigned,
       totalInstalled,
-      // Floored at zero: `assigned` is cumulative, while a return is recorded as
-      // an inventory movement and never written back to the form that issued it,
-      // so stock handed out and given back counts twice here.
+      // Floored at zero: only a formal RTN is netted off above, while an ad-hoc
+      // return request adjusts inventory without ever being written back to the
+      // form that issued it, so stock handed out and given back that way still
+      // counts twice here.
       totalAvailable: Math.max(0, totalReceived - totalAssigned),
       totalGrns: completedGrns.length,
       totalAsns: issuedForms.length,
     };
-  }, [completedGrns, issuedForms, micData]);
+  }, [completedGrns, issuedForms, approvedRtns, micData]);
 
   const recentAsns = useMemo(
     () => [...issuedForms]
@@ -102,17 +118,23 @@ export default function DashboardPage() {
       entry(form.projectSite?.trim() || 'Unassigned').assigned +=
         (form.items ?? []).reduce((sum, line) => sum + (line.qtyIssued || 0), 0);
     }
+    // Returns land on the site they came back from, so a scheme only nets out
+    // when the RTN names its project/site the same way the ASN did.
+    for (const rtn of approvedRtns) {
+      entry(rtn.projectSite?.trim() || 'Unassigned').assigned -=
+        (rtn.items ?? []).reduce((sum, line) => sum + (line.qtyReturned || 0), 0);
+    }
 
     return [...byScheme.entries()]
       .map(([scheme, totals]) => ({
         scheme,
         received: totals.received,
-        assigned: totals.assigned,
-        available: Math.max(0, totals.received - totals.assigned),
+        assigned: Math.max(0, totals.assigned),
+        available: Math.max(0, totals.received - Math.max(0, totals.assigned)),
       }))
       .sort((a, b) => b.received - a.received)
       .slice(0, 5);
-  }, [completedGrns, issuedForms]);
+  }, [completedGrns, issuedForms, approvedRtns]);
 
   const greeting = () => {
     const h = new Date().getHours();
@@ -253,6 +275,51 @@ export default function DashboardPage() {
                   <Link to="/forms/mic" className="btn btn-ghost btn-sm">Review</Link>
                 </div>
               ))}
+            </div>
+          </div>
+        )}
+
+        {/* Returns waiting to be booked back onto the shelf */}
+        {isManager && pendingRtnList.length > 0 && (
+          <div className="card" style={{ gridColumn: '1 / -1' }}>
+            <div className="flex items-center justify-between" style={{ marginBottom: 16 }}>
+              <div className="flex items-center gap-2">
+                <RotateCcw size={16} color="var(--yellow)" />
+                <span style={{ fontFamily: 'var(--font-display)', fontWeight: 600 }}>
+                  Return Documents Pending Approval
+                </span>
+                <span className="badge badge-yellow">{pendingRtnList.length}</span>
+              </div>
+              <Link to="/forms/rtn" className="btn btn-ghost btn-sm">View all</Link>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {pendingRtnList.slice(0, 3).map(rtn => {
+                const qty = (rtn.items ?? []).reduce((sum, line) => sum + (line.qtyReturned || 0), 0);
+                return (
+                  <div key={rtn.id} style={{
+                    background: 'var(--bg-3)', borderRadius: 'var(--radius)',
+                    padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  }}>
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 500 }}>
+                        <span style={{ color: 'var(--accent)' }}>{rtn.rtnNo}</span>
+                        {rtn.projectSite && (
+                          <span style={{ color: 'var(--text-2)', marginLeft: 8 }}>{rtn.projectSite}</span>
+                        )}
+                      </div>
+                      <div style={{ fontSize: 12, color: 'var(--text-2)', marginTop: 3 }}>
+                        {qty}× returned by {rtn.returnedBy
+                          ? `${rtn.returnedBy.firstName} ${rtn.returnedBy.lastName}`
+                          : 'unknown'}
+                        <span style={{ marginLeft: 8, color: 'var(--text-3)' }}>
+                          {formatDistanceToNow(new Date(rtn.createdAt), { addSuffix: true })}
+                        </span>
+                      </div>
+                    </div>
+                    <Link to="/forms/rtn" className="btn btn-ghost btn-sm">Review</Link>
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}

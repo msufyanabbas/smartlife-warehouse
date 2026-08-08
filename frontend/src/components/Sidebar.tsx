@@ -9,6 +9,7 @@ import { useAuth } from '../contexts/AuthContext';
 import ThemeToggle from './ThemeToggle';
 import {
   usePendingTransfers, usePendingReturnRequests, usePendingItemRequests, usePendingMic,
+  usePendingRtn,
 } from '../hooks/useApi';
 
 export default function Sidebar() {
@@ -22,11 +23,13 @@ export default function Sidebar() {
   const { data: pendingReturns } = usePendingReturnRequests(isManager);
   const { data: pendingItems } = usePendingItemRequests(isManager);
   const { data: pendingMic } = usePendingMic(isManager);
+  const { data: pendingRtn } = usePendingRtn(isManager);
 
   const pendingTransferCount = Array.isArray(pendingTransfers) ? pendingTransfers.length : 0;
   const pendingReturnCount = Array.isArray(pendingReturns) ? pendingReturns.length : 0;
   const pendingItemCount = Array.isArray(pendingItems) ? pendingItems.length : 0;
   const pendingMicCount = Array.isArray(pendingMic) ? pendingMic.length : 0;
+  const pendingRtnCount = Array.isArray(pendingRtn) ? pendingRtn.length : 0;
 
   const handleLogout = () => { logout(); navigate('/login'); };
 
@@ -128,8 +131,9 @@ export default function Sidebar() {
           <Activity size={16} /> Usage Log
         </NavLink>
 
-        {/* Workers raise their own installation confirmations, so this one document
-            is reachable without the rest of the manager-only Documents section. */}
+        {/* Workers raise their own installation confirmations and returns, so these
+            two documents are reachable without the rest of the manager-only
+            Documents section. */}
         {!isManager && (
           <>
             <div className="sidebar-section-label">
@@ -137,6 +141,9 @@ export default function Sidebar() {
             </div>
             <NavLink to="/forms/mic" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
               <ClipboardCheck size={16} /> Material Installation
+            </NavLink>
+            <NavLink to="/forms/rtn" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+              <RotateCcw size={16} /> Return Documents
             </NavLink>
           </>
         )}
@@ -158,6 +165,10 @@ export default function Sidebar() {
             <NavLink to="/forms/mic" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
               <ClipboardCheck size={16} /> Material Installation
               {pendingMicCount > 0 && <span className="badge-count">{pendingMicCount}</span>}
+            </NavLink>
+            <NavLink to="/forms/rtn" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}>
+              <RotateCcw size={16} /> Return Documents
+              {pendingRtnCount > 0 && <span className="badge-count">{pendingRtnCount}</span>}
             </NavLink>
 
             <div className="sidebar-section-label">

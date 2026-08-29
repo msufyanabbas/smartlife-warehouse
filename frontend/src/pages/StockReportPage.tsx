@@ -28,6 +28,12 @@ interface InventoryItem {
   category?: string; serialNumber?: string;
   grnId?: string; grnNo?: string;
   receivedAt?: string; createdAt: string;
+  /**
+   * The warehouse's own grading of the unit — new / good / fair / poor. Safe to
+   * read here, unlike the quantity columns above: it is a property of the stock
+   * rather than a running balance, so it carries no period to be wrong about.
+   */
+  condition?: string;
 }
 
 interface UsageRecord {
@@ -58,10 +64,12 @@ interface AssignmentFormDocument {
 
 interface RtnLine {
   itemCode?: string; qtyReturned?: number; itemId?: string;
+  condition?: string; reason?: string;
 }
 
 interface RtnDocumentRow {
   id: string; rtnNo: string; status: string;
+  approvedAt?: string; createdAt?: string;
   items?: RtnLine[];
 }
 
@@ -73,6 +81,11 @@ interface StockRow {
   schemeNo: string;
   grnNo: string;
   category: string;
+  /** The row's own grading, lowercased so the filter never misses on casing. */
+  condition: string;
+  /** Condition and reason off the last approved RTN line, blank if never returned. */
+  rtnCondition: string;
+  rtnReason: string;
   opening: number;
   received: number;
   assigned: number;
@@ -93,6 +106,38 @@ function parseDate(value: string): Date {
 
 const matchKey = (sku?: string, schemeNo?: string) =>
   `${(sku || '').trim().toLowerCase()}|${(schemeNo || '').trim().toLowerCase()}`;
+
+/**
+ * Two different vocabularies, deliberately kept apart.
+ *
+ * An inventory row is graded new / good / fair / poor — that is the shelf's own
+ * view of the stock. An RTN line is graded Good / Damaged / Expired / Other —
+ * that is the site's verdict at the moment it came back. They are not the same
+ * scale and neither is derivable from the other, so a row can read "good" on the
+ * shelf and still show that its last return came in Damaged.
+ */
+const ITEM_CONDITIONS = ['new', 'good', 'fair', 'poor'];
+
+const CONDITION_BADGE: Record<string, string> = {
+  new: 'green', good: 'blue', fair: 'yellow', poor: 'red',
+};
+const CONDITION_COLOR: Record<string, string> = {
+  new: '#10b981', good: '#3b82f6', fair: '#f59e0b', poor: '#ef4444',
+};
+/** The same swatches as RGB triples, for jsPDF — it takes no CSS colours. */
+const CONDITION_RGB: Record<string, [number, number, number]> = {
+  new: [16, 185, 129], good: [59, 130, 246], fair: [245, 158, 11], poor: [239, 68, 68],
+};
+
+const RTN_CONDITION_COLOR: Record<string, string> = {
+  Good: '#10b981', Damaged: '#ef4444', Expired: '#f59e0b', Other: '#6b7280',
+};
+/** Mirrors the picker on the RTN form, so a chip exists for every reason a line can carry. */
+const RTN_REASONS = ['Project Complete', 'Defective', 'Excess Stock', 'Wrong Item', 'Other'];
+
+const conditionColor = (c: string) => CONDITION_COLOR[c] ?? '#6b7280';
+const rtnConditionColor = (c: string) => RTN_CONDITION_COLOR[c] ?? '#6b7280';
+const titleCase = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : '');
 
 const QUICK_RANGES = [
   { label: 'This Month', getValue: () => ({ from: format(startOfMonth(new Date()), 'yyyy-MM-dd'), to: format(endOfMonth(new Date()), 'yyyy-MM-dd') }) },
@@ -148,6 +193,8 @@ function StockMovementReport() {
   const [search, setSearch] = useState('');
   const [schemeFilters, setSchemeFilters] = useState<string[]>([]);
   const [categoryFilters, setCategoryFilters] = useState<string[]>([]);
+  const [conditionFilters, setConditionFilters] = useState<string[]>([]);
+  const [rtnReasonFilters, setRtnReasonFilters] = useState<string[]>([]);
 
   const list = items as InventoryItem[];
   const usage = usageData as UsageRecord[];
@@ -296,6 +343,41 @@ function StockMovementReport() {
     return { byItemId, bySkuUnlinked };
   }, [rtns]);
 
+  /**
+   * What the *last* approved return said about each row: the condition it came
+   * back in, and why it came back.
+   *
+   * Kept apart from `rtnReturned`, which only ever needs quantities. A row can be
+   * returned against several times, and the useful reading is the most recent
+   * verdict rather than the first — so the approved returns are walked oldest
+   * first and each write overwrites the one before it. Keyed the same two ways
+   * as the quantity map, for the same reason: a line normally names its row
+   * outright, and one carrying only a SKU falls back to the SKU map.
+   */
+  const rtnDetail = useMemo(() => {
+    const byItemId = new Map<string, { condition: string; reason: string }>();
+    const bySkuUnlinked = new Map<string, { condition: string; reason: string }>();
+    const approvedOldestFirst = rtns
+      .filter(r => r.status === 'approved')
+      .sort((a, b) =>
+        new Date(a.approvedAt || a.createdAt || 0).getTime()
+        - new Date(b.approvedAt || b.createdAt || 0).getTime());
+
+    for (const rtn of approvedOldestFirst) {
+      for (const line of rtn.items ?? []) {
+        const detail = { condition: line.condition || '', reason: line.reason || '' };
+        // A line that stated neither would blank out an earlier line that did.
+        if (!detail.condition && !detail.reason) continue;
+        if (line.itemId) {
+          byItemId.set(line.itemId, detail);
+        } else if (line.itemCode?.trim()) {
+          bySkuUnlinked.set(matchKey(line.itemCode), detail);
+        }
+      }
+    }
+    return { byItemId, bySkuUnlinked };
+  }, [rtns]);
+
   /** Consumption logged against each row, kept with its date so a period can be cut out of it. */
   const usageByItem = useMemo(() => {
     const byItem = new Map<string, { date: Date; qty: number }[]>();
@@ -328,6 +410,18 @@ function StockMovementReport() {
     const from = dateFrom ? new Date(dateFrom + 'T00:00:00') : new Date('2000-01-01T00:00:00');
     const to = dateTo ? new Date(dateTo + 'T23:59:59') : new Date();
 
+    /**
+     * The verdict the last approved return left on this row, resolved the same
+     * way its quantity was: by row id, falling back to SKU only where that SKU
+     * sits on a single row — on a duplicated SKU there is no telling which row
+     * the return came off, and guessing would label the wrong stock Damaged.
+     */
+    const returnVerdict = (item: InventoryItem) => {
+      const sku = matchKey(item.sku);
+      return rtnDetail.byItemId.get(item.id)
+        ?? (ambiguousSkus.has(sku) ? undefined : rtnDetail.bySkuUnlinked.get(sku));
+    };
+
     return list
       .filter(item => {
         // Every number below is built from GRN receipts, so a row no GRN ever
@@ -338,10 +432,17 @@ function StockMovementReport() {
         // No selection means "every scheme", not "no scheme".
         const matchScheme = !schemeFilters.length || schemeFilters.includes(item.schemeNo || '');
         const matchCat = !categoryFilters.length || categoryFilters.includes(item.category || '');
-        return matchSearch && matchScheme && matchCat;
+        const matchCondition = !conditionFilters.length
+          || conditionFilters.includes((item.condition || '').toLowerCase());
+        // Picking a reason narrows to stock that actually came back for it, so a
+        // row with no approved return drops out rather than matching on blank.
+        const matchReason = !rtnReasonFilters.length
+          || rtnReasonFilters.includes(returnVerdict(item)?.reason || '');
+        return matchSearch && matchScheme && matchCat && matchCondition && matchReason;
       })
       .map(item => {
         const receipts = receiptsByItem.get(item.id) ?? [];
+        const verdict = returnVerdict(item);
 
         // Opening — everything GRNs receipted onto this row before the period
         // opened. Read off the receipts themselves rather than reasoning
@@ -398,6 +499,9 @@ function StockMovementReport() {
           schemeNo: item.schemeNo || '',
           grnNo: item.grnNo || '',
           category: item.category || '',
+          condition: (item.condition || '').toLowerCase(),
+          rtnCondition: verdict?.condition || '',
+          rtnReason: verdict?.reason || '',
           opening,
           received,
           assigned,
@@ -405,7 +509,7 @@ function StockMovementReport() {
           closing,
         };
       });
-  }, [list, usageByItem, receiptsByItem, asnIssued, rtnReturned, ambiguousSkus, dateFrom, dateTo, search, schemeFilters, categoryFilters]);
+  }, [list, usageByItem, receiptsByItem, asnIssued, rtnReturned, rtnDetail, ambiguousSkus, dateFrom, dateTo, search, schemeFilters, categoryFilters, conditionFilters, rtnReasonFilters]);
 
   // Totals
   const totals = useMemo(() => ({
@@ -433,6 +537,9 @@ function StockMovementReport() {
       'Scheme No.': r.schemeNo,
       'GRN No.': r.grnNo,
       'Category': r.category,
+      'Condition': titleCase(r.condition),
+      'Returned As': r.rtnCondition,
+      'Return Reason': r.rtnReason,
       'Opening': r.opening,
       'Received': r.received,
       'Assigned': r.assigned,
@@ -448,6 +555,9 @@ function StockMovementReport() {
       'Scheme No.': '',
       'GRN No.': '',
       'Category': '',
+      'Condition': '',
+      'Returned As': '',
+      'Return Reason': '',
       'Opening': totals.opening,
       'Received': totals.received,
       'Assigned': totals.assigned,
@@ -613,13 +723,14 @@ function StockMovementReport() {
     // ── Main table ──
     autoTable(doc, {
       startY: tableLabelY + 3,
-      head: [['#', 'Product', 'SKU', 'Scheme', 'Opening', 'Received', 'Assigned', 'Issued', 'Closing']],
+      head: [['#', 'Product', 'SKU', 'Scheme', 'Condition', 'Opening', 'Received', 'Assigned', 'Issued', 'Closing']],
       body: [
         ...reportRows.map((row, idx) => [
           idx + 1,
           row.name,
           row.sku,
           row.schemeNo || '—',
+          titleCase(row.condition) || '—',
           row.opening || '—',
           row.received > 0 ? `+${row.received}` : '—',
           row.assigned > 0 ? String(row.assigned) : '—',
@@ -627,7 +738,7 @@ function StockMovementReport() {
           row.closing,
         ]),
         // Totals row
-        ['', `TOTAL (${reportRows.length} items)`, '', '',
+        ['', `TOTAL (${reportRows.length} items)`, '', '', '',
           totals.opening, `+${totals.received}`, totals.assigned,
           totals.issued > 0 ? `-${totals.issued}` : '0', totals.closing],
       ],
@@ -640,20 +751,32 @@ function StockMovementReport() {
         halign: 'center',
       },
       // Widths sum to contentW (269mm), so the table spans the same band as the
-      // title bar and the stats row: 8+65+38+38+24+24+24+24+24.
+      // title bar and the stats row: 8+59+32+30+20+24+24+24+24+24. Condition was
+      // paid for out of the three text columns, which had the slack to give.
       columnStyles: {
         0: { cellWidth: 8, halign: 'center' },
-        1: { cellWidth: 65 },
-        2: { cellWidth: 38, font: 'courier', fontSize: 7 },
-        3: { cellWidth: 38 },
-        4: { cellWidth: 24, halign: 'center' },
-        5: { cellWidth: 24, halign: 'center', textColor: [0, 150, 80] },
-        6: { cellWidth: 24, halign: 'center', textColor: [107, 47, 217] },
-        7: { cellWidth: 24, halign: 'center', textColor: [200, 100, 0] },
-        8: { cellWidth: 24, halign: 'center', fontStyle: 'bold' },
+        1: { cellWidth: 59 },
+        2: { cellWidth: 32, font: 'courier', fontSize: 7 },
+        3: { cellWidth: 30 },
+        4: { cellWidth: 20, halign: 'center' },
+        5: { cellWidth: 24, halign: 'center' },
+        6: { cellWidth: 24, halign: 'center', textColor: [0, 150, 80] },
+        7: { cellWidth: 24, halign: 'center', textColor: [107, 47, 217] },
+        8: { cellWidth: 24, halign: 'center', textColor: [200, 100, 0] },
+        9: { cellWidth: 24, halign: 'center', fontStyle: 'bold' },
       },
       alternateRowStyles: { fillColor: [248, 248, 252] },
       didParseCell: (data) => {
+        // Condition inks itself — the same swatches the on-screen badges use, so
+        // a Poor row reads red on paper too. Body rows only: the totals row has
+        // no condition and is repainted whole below.
+        if (data.section === 'body' && data.column.index === 4 && data.row.index < reportRows.length) {
+          const rgb = CONDITION_RGB[reportRows[data.row.index].condition];
+          if (rgb) {
+            data.cell.styles.textColor = rgb;
+            data.cell.styles.fontStyle = 'bold';
+          }
+        }
         // Style totals row. Section-guarded: with no rows at all the totals row
         // sits at body index 0, which would otherwise repaint the header too.
         if (data.section === 'body' && data.row.index === reportRows.length) {
@@ -697,6 +820,8 @@ function StockMovementReport() {
     const filterParts = [];
     if (schemeFilters.length > 0) filterParts.push(`Schemes: ${schemeFilters.join(', ')}`);
     if (categoryFilters.length > 0) filterParts.push(`Categories: ${categoryFilters.join(', ')}`);
+    if (conditionFilters.length > 0) filterParts.push(`Condition: ${conditionFilters.map(titleCase).join(', ')}`);
+    if (rtnReasonFilters.length > 0) filterParts.push(`Return reason: ${rtnReasonFilters.join(', ')}`);
     if (search) filterParts.push(`Search: "${search}"`);
     if (dateFrom || dateTo) filterParts.push(`Date: ${dateFrom || 'All'} → ${dateTo || 'Today'}`);
     if (filterParts.length > 0) notes.push(`Filters applied: ${filterParts.join(' · ')}`);
@@ -715,11 +840,29 @@ function StockMovementReport() {
 
   const clearFilters = () => {
     setSearch(''); setSchemeFilters([]); setCategoryFilters([]);
+    setConditionFilters([]); setRtnReasonFilters([]);
     // Reset dates to this month default, not empty (empty breaks date formatting)
     setDateFrom(format(startOfMonth(new Date()), 'yyyy-MM-dd'));
     setDateTo(today);
   };
-  const hasFilters = !!search || schemeFilters.length > 0 || categoryFilters.length > 0;
+  const hasFilters = !!search || schemeFilters.length > 0 || categoryFilters.length > 0
+    || conditionFilters.length > 0 || rtnReasonFilters.length > 0;
+
+  /** One filter chip. Active paints the swatch solid; idle keeps it as the outline. */
+  const filterChip = (label: string, color: string, active: boolean, onToggle: () => void) => (
+    <button
+      key={label}
+      onClick={onToggle}
+      style={{
+        padding: '3px 10px', fontSize: 11, fontWeight: 600, cursor: 'pointer',
+        borderRadius: 999, border: `1px solid ${active ? color : 'var(--border)'}`,
+        background: active ? color : 'transparent',
+        color: active ? '#fff' : color,
+      }}
+    >
+      {label}
+    </button>
+  );
 
   const statCard = (label: string, value: number, color: string, bg: string) => (
     <div style={{ flex: 1, background: bg, border: `1px solid ${color}33`, borderRadius: 'var(--radius-lg)', padding: '16px 20px' }}>
@@ -788,11 +931,39 @@ function StockMovementReport() {
           )}
         </div>
 
+        {/* Condition of the stock on the shelf, and why the last return sent it
+            back — two separate questions, so two separate chip rows. */}
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginTop: 12 }}>
+          <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.06em', minWidth: 84 }}>
+            Condition
+          </span>
+          {ITEM_CONDITIONS.map(cond => filterChip(
+            titleCase(cond),
+            conditionColor(cond),
+            conditionFilters.includes(cond),
+            () => setConditionFilters(prev => prev.includes(cond) ? prev.filter(c => c !== cond) : [...prev, cond]),
+          ))}
+        </div>
+
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginTop: 8 }}>
+          <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.06em', minWidth: 84 }}>
+            Return Reason
+          </span>
+          {RTN_REASONS.map(reason => filterChip(
+            reason,
+            'var(--purple)',
+            rtnReasonFilters.includes(reason),
+            () => setRtnReasonFilters(prev => prev.includes(reason) ? prev.filter(r => r !== reason) : [...prev, reason]),
+          ))}
+        </div>
+
         {hasFilters && (
           <div style={{ marginTop: 10, fontSize: 12, color: 'var(--text-3)' }}>
             Showing <strong style={{ color: 'var(--text)' }}>{reportRows.length}</strong> of {list.length} items
             {schemeFilters.length > 0 && ` · Schemes: ${schemeFilters.join(', ')}`}
             {categoryFilters.length > 0 && ` · Categories: ${categoryFilters.join(', ')}`}
+            {conditionFilters.length > 0 && ` · Condition: ${conditionFilters.map(titleCase).join(', ')}`}
+            {rtnReasonFilters.length > 0 && ` · Returned for: ${rtnReasonFilters.join(', ')}`}
           </div>
         )}
       </div>
@@ -823,6 +994,8 @@ function StockMovementReport() {
                 <th>Scheme</th>
                 <th>GRN No.</th>
                 <th>Category</th>
+                <th>Condition</th>
+                <th>Returned As</th>
                 <th style={{ textAlign: 'center', background: 'var(--bg-3)' }}>Opening</th>
                 <th style={{ textAlign: 'center', color: 'var(--green)' }}>Received</th>
                 <th style={{ textAlign: 'center', color: 'var(--purple)' }}>Assigned</th>
@@ -851,6 +1024,29 @@ function StockMovementReport() {
                         : <span style={{ color: 'var(--text-3)' }}>No GRN</span>}
                     </td>
                     <td style={{ fontSize: 12, color: 'var(--text-2)' }}>{row.category || '—'}</td>
+                    <td>
+                      {row.condition
+                        ? <span className={`badge badge-${CONDITION_BADGE[row.condition] || 'blue'}`}>{row.condition}</span>
+                        : <span style={{ color: 'var(--text-3)', fontSize: 12 }}>—</span>}
+                    </td>
+                    <td style={{ fontSize: 12 }}>
+                      {row.rtnCondition || row.rtnReason ? (
+                        <>
+                          {row.rtnCondition && (
+                            <span style={{
+                              padding: '2px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700,
+                              background: `${rtnConditionColor(row.rtnCondition)}22`,
+                              color: rtnConditionColor(row.rtnCondition),
+                            }}>
+                              {row.rtnCondition}
+                            </span>
+                          )}
+                          {row.rtnReason && (
+                            <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 3 }}>{row.rtnReason}</div>
+                          )}
+                        </>
+                      ) : <span style={{ color: 'var(--text-3)' }}>—</span>}
+                    </td>
                     <td style={{ textAlign: 'center', fontWeight: 600 }}>{row.opening}</td>
                     <td style={{ textAlign: 'center', fontWeight: 700, color: row.received > 0 ? 'var(--green)' : 'var(--text-3)' }}>
                       {row.received > 0 ? `+${row.received}` : '—'}
@@ -871,7 +1067,7 @@ function StockMovementReport() {
             {/* Totals row */}
             <tfoot>
               <tr style={{ background: 'var(--bg-3)', fontWeight: 700, fontSize: 13 }}>
-                <td colSpan={6} style={{ padding: '10px 16px', color: 'var(--text-2)', textTransform: 'uppercase', letterSpacing: '0.05em', fontSize: 11 }}>
+                <td colSpan={8} style={{ padding: '10px 16px', color: 'var(--text-2)', textTransform: 'uppercase', letterSpacing: '0.05em', fontSize: 11 }}>
                   Total ({reportRows.length} items)
                 </td>
                 <td style={{ textAlign: 'center', padding: '10px 16px' }}>{totals.opening}</td>
@@ -888,7 +1084,7 @@ function StockMovementReport() {
       {/* Legend */}
       <div style={{ marginTop: 16, padding: '12px 16px', background: 'var(--bg-2)', borderRadius: 'var(--radius)', border: '1px solid var(--border)', fontSize: 12, color: 'var(--text-3)' }}>
         <strong style={{ color: 'var(--text-2)' }}>How it works:</strong>
-        {' '}Every figure is derived from documents, not from live inventory balances. Opening = received via GRN before this period · Received = received via GRN in this period · Assigned = total handed out on Assignment Forms minus what approved Return Documents (RTN) brought back, all time · Issued = consumed via the usage log in this period · <strong style={{ color: 'var(--text-2)' }}>Closing = Opening + Received − Assigned</strong>. Issued is shown but not subtracted — stock has to be assigned before it can be consumed, so it already left the warehouse under Assigned. Only items with GRN history appear, and Closing will not always match the Inventory page.
+        {' '}Every figure is derived from documents, not from live inventory balances. Opening = received via GRN before this period · Received = received via GRN in this period · Assigned = total handed out on Assignment Forms minus what approved Return Documents (RTN) brought back, all time · Issued = consumed via the usage log in this period · <strong style={{ color: 'var(--text-2)' }}>Closing = Opening + Received − Assigned</strong>. Issued is shown but not subtracted — stock has to be assigned before it can be consumed, so it already left the warehouse under Assigned. Only items with GRN history appear, and Closing will not always match the Inventory page. <strong style={{ color: 'var(--text-2)' }}>Condition</strong> is the warehouse's own grading of the row; <strong style={{ color: 'var(--text-2)' }}>Returned As</strong> is what the most recent approved RTN said when the stock came back — a row never returned shows neither.
       </div>
     </div>
   );

@@ -274,6 +274,16 @@ function ProductRow({ row, index, onUpdate, onRemove, usedProductIds, categories
   );
 }
 
+/** Grading vocabulary of an inventory row; `badge` names an existing badge class. */
+const CONDITIONS: { value: string; badge: string; color: string }[] = [
+  { value: 'new', badge: 'green', color: '#10b981' },
+  { value: 'good', badge: 'blue', color: '#3b82f6' },
+  { value: 'fair', badge: 'yellow', color: '#f59e0b' },
+  { value: 'poor', badge: 'red', color: '#ef4444' },
+];
+const conditionMeta = (c: string) => CONDITIONS.find(x => x.value === c);
+const titleCase = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : '');
+
 const newRow = () => ({
   productId: '', productName: '', sku: '', description: '', brand: '', model: '',
   category: '', unit: '', condition: 'new', location: '', notes: '',
@@ -522,7 +532,7 @@ export default function InventoryPage() {
 
       {/* ── Filters ── */}
       <div style={{ background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', padding: '14px 18px', marginBottom: 20 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr', gap: 10, marginBottom: 10 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr', gap: 10, marginBottom: 10 }}>
           <div className="search-bar">
             <Search size={14} />
             <input placeholder="Search name, SKU, serial, PO, scheme…" value={search} onChange={e => setSearch(e.target.value)} />
@@ -539,12 +549,6 @@ export default function InventoryPage() {
             onChange={setCategoryFilters}
             placeholder="All Categories"
           />
-          <select className="form-input" value={conditionFilter} onChange={e => setConditionFilter(e.target.value)}>
-            <option value="">All Conditions</option>
-            {['new', 'good', 'fair', 'poor'].map(c => (
-              <option key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</option>
-            ))}
-          </select>
           <select className="form-input" value={stockFilter} onChange={e => setStockFilter(e.target.value)}>
             <option value="">All Stock</option>
             <option value="in">In Stock</option>
@@ -552,6 +556,29 @@ export default function InventoryPage() {
             <option value="out">Out of Stock</option>
           </select>
         </div>
+        {/* Condition chips. One at a time — the grading is a single value per row,
+            so a second pick replaces the first rather than widening the net. */}
+        <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
+          <span style={{ fontSize: 12, color: 'var(--text-3)', whiteSpace: 'nowrap' }}>Condition:</span>
+          {CONDITIONS.map(({ value, color }) => {
+            const active = conditionFilter === value;
+            return (
+              <button
+                key={value}
+                onClick={() => setConditionFilter(active ? '' : value)}
+                style={{
+                  padding: '3px 12px', fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                  borderRadius: 999, border: `1px solid ${active ? color : 'var(--border)'}`,
+                  background: active ? color : 'transparent',
+                  color: active ? '#fff' : color,
+                }}
+              >
+                {titleCase(value)}
+              </button>
+            );
+          })}
+        </div>
+
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <span style={{ fontSize: 12, color: 'var(--text-3)', whiteSpace: 'nowrap' }}>Received date:</span>
           <input type="date" className="form-input" style={{ width: 160 }} max={today} value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
@@ -670,7 +697,7 @@ export default function InventoryPage() {
                               <td style={{ width: 55, textAlign: 'center', fontWeight: 700, color: ac }}>{item.availableQuantity}</td>
                               <td style={{ width: 65, textAlign: 'center', color: 'var(--yellow)' }}>{item.assignedQuantity}</td>
                               <td style={{ width: 50, textAlign: 'center', color: 'var(--purple)' }}>{item.usedQuantity}</td>
-                              <td style={{ width: 75 }}><span className={`badge badge-${item.condition === 'new' ? 'green' : item.condition === 'good' ? 'blue' : item.condition === 'fair' ? 'yellow' : 'red'}`}>{item.condition}</span></td>
+                              <td style={{ width: 75 }}><span className={`badge badge-${conditionMeta(item.condition)?.badge ?? 'red'}`}>{item.condition}</span></td>
                               <td style={{ fontSize: 12, color: 'var(--text-2)', width: 75, maxWidth: 75, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                 {item.location || '—'}
                               </td>

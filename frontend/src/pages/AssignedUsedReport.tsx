@@ -320,7 +320,7 @@ export default function AssignedUsedReport() {
 
     return [...rows.values()].map(row => ({
       ...row,
-      closing: Math.max(0, row.assigned - row.installed - row.returned - row.transferred),
+      closing: Math.max(0, row.assigned - row.installed - row.returned),
     }));
   }, [formsData, inventoryData, micData, rtnData, transferFormsData, dateFrom, dateTo, workerFilter]);
 
@@ -379,8 +379,7 @@ export default function AssignedUsedReport() {
     installed: rows.reduce((sum, r) => sum + r.installed, 0),
     returned: rows.reduce((sum, r) => sum + r.returned, 0),
     transferred: rows.reduce((sum, r) => sum + r.transferred, 0),
-    // closing: rows.reduce((sum, r) => sum + r.closing, 0),
-    closing:   rows.reduce((sum, r) => sum + r.assigned, 0) - rows.reduce((sum, r) => sum + r.installed, 0) - rows.reduce((sum, r) => sum + r.returned, 0) - rows.reduce((sum, r) => sum + r.transferred, 0),
+    closing: rows.reduce((sum, r) => sum + r.closing, 0),
     forms: new Set(rows.flatMap(r => r.assignmentNos)).size,
   }), [rows]);
 

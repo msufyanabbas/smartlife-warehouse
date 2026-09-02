@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { ClipboardList, Download, FileDown, Filter, Search } from 'lucide-react';
+import { Calendar, ClipboardList, Download, FileDown, Filter, Search } from 'lucide-react';
 import { format } from 'date-fns';
 import {
   useAssignmentForms, useRtnList, useMicList, useTransferForms, useInventory,
@@ -18,6 +18,7 @@ interface AsnLine {
 
 interface AsnForm {
   id: string; assignmentNo: string; status: string;
+  date?: string; createdAt?: string; updatedAt?: string;
   projectSite?: string;
   items?: AsnLine[];
 }
@@ -34,7 +35,7 @@ interface TrfForm { id: string; status: string; items?: TrfLine[] }
 interface InvItem {
   id: string; name: string; sku: string;
   schemeNo?: string; category?: string; serialNumber?: string;
-  condition?: string; availableQuantity: number;
+  condition?: string;
 }
 
 /** One inventory item, rolled up across every issued ASN that ever named it. */
@@ -48,15 +49,7 @@ interface IssuedRow {
   schemeNo: string;
   category: string;
   serialNumber: string;
-  /**
-   * What the inventory row currently has available on the shelf.
-   *
-   * The one live figure on this report, and read as such: it is today's balance
-   * for the item, not the opening of a period. Every other column on the row is
-   * derived from the documents.
-   */
-  opening: number;
-  /** Handed out on issued ASN forms, all time. */
+  /** Handed out on issued ASN forms inside the selected date range. */
   assigned: number;
   /** Fitted on approved MIC forms — stock that went out and stayed out. */
   installed: number;
@@ -93,6 +86,17 @@ const titleCase = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : '
 const skuKey = (value?: string) => (value || '').trim().toLowerCase();
 
 /**
+ * `date` is a DATE column, so it arrives as a bare 'YYYY-MM-DD'. `new Date()`
+ * would read that as UTC midnight and shift it a day in negative offsets, so
+ * anchor it to local midnight instead. Full timestamps pass through.
+ */
+function parseDate(value: string): Date {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value)
+    ? new Date(`${value}T00:00:00`)
+    : new Date(value);
+}
+
+/**
  * What became of the stock after it was handed out.
  *
  * One row per inventory item rather than per ASN line: an item issued on four
@@ -115,6 +119,8 @@ export default function AssignedUsedReport() {
   const { data: inventoryData = [] } = useInventory();
 
   const [search, setSearch] = useState('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
   const [schemeFilters, setSchemeFilters] = useState<string[]>([]);
   const [categoryFilters, setCategoryFilters] = useState<string[]>([]);
   const [conditionFilters, setConditionFilters] = useState<string[]>([]);
@@ -123,7 +129,25 @@ export default function AssignedUsedReport() {
   const [transferredOnly, setTransferredOnly] = useState(false);
 
   const allRows = useMemo((): IssuedRow[] => {
-    const forms = (formsData as AsnForm[]).filter(form => form.status === 'issued');
+    // The range narrows the hand-outs, not what became of them: a form issued
+    // in June is in scope with everything its stock has done since, including
+    // an installation or a return booked in August. Narrowing those too would
+    // report items as still out purely because the paperwork closing them fell
+    // outside the window. A form carrying no date at all stays in scope rather
+    // than dropping out of every range.
+    const from = dateFrom ? new Date(`${dateFrom}T00:00:00`) : null;
+    const to = dateTo ? new Date(`${dateTo}T23:59:59`) : null;
+
+    const forms = (formsData as AsnForm[]).filter(form => {
+      if (form.status !== 'issued') return false;
+      if (!from && !to) return true;
+      const stamp = form.date || form.updatedAt || form.createdAt;
+      if (!stamp) return true;
+      const issuedAt = parseDate(stamp);
+      if (from && issuedAt < from) return false;
+      if (to && issuedAt > to) return false;
+      return true;
+    });
     const inventory = inventoryData as InvItem[];
 
     const invById = new Map(inventory.map(item => [item.id, item] as const));
@@ -184,7 +208,6 @@ export default function AssignedUsedReport() {
             schemeNo: invItem?.schemeNo || form.projectSite || '',
             category: invItem?.category || '',
             serialNumber: line.serialNumber || invItem?.serialNumber || '',
-            opening: invItem?.availableQuantity ?? 0,
             assigned: 0,
             installed: 0,
             returned: 0,
@@ -256,7 +279,7 @@ export default function AssignedUsedReport() {
       ...row,
       closing: Math.max(0, row.assigned - row.installed - row.returned),
     }));
-  }, [formsData, inventoryData, micData, rtnData, transferFormsData]);
+  }, [formsData, inventoryData, micData, rtnData, transferFormsData, dateFrom, dateTo]);
 
   const schemeOptions = useMemo(
     () => [...new Set(allRows.map(r => r.schemeNo).filter(Boolean))].sort(),
@@ -288,6 +311,24 @@ export default function AssignedUsedReport() {
   }, [allRows, search, schemeFilters, categoryFilters, conditionFilters,
     installedOnly, returnedOnly, transferredOnly]);
 
+  /**
+   * Which of the three follow-up columns to show.
+   *
+   * Narrowing to one document is a way of asking about that document, so the
+   * other two columns are noise on the answer. With nothing narrowed all three
+   * are on show; with more than one narrowed each one asked for stays, rather
+   * than the three cancelling each other out and leaving the table with no
+   * follow-up columns at all.
+   */
+  const visibleColumns = useMemo(() => {
+    const narrowed = installedOnly || returnedOnly || transferredOnly;
+    return {
+      installed: !narrowed || installedOnly,
+      returned: !narrowed || returnedOnly,
+      transferred: !narrowed || transferredOnly,
+    };
+  }, [installedOnly, returnedOnly, transferredOnly]);
+
   const totals = useMemo(() => ({
     assigned: rows.reduce((sum, r) => sum + r.assigned, 0),
     installed: rows.reduce((sum, r) => sum + r.installed, 0),
@@ -298,29 +339,34 @@ export default function AssignedUsedReport() {
   }), [rows]);
 
   const clearFilters = () => {
-    setSearch(''); setSchemeFilters([]); setCategoryFilters([]); setConditionFilters([]);
+    setSearch(''); setDateFrom(''); setDateTo('');
+    setSchemeFilters([]); setCategoryFilters([]); setConditionFilters([]);
     setInstalledOnly(false); setReturnedOnly(false); setTransferredOnly(false);
   };
-  const hasFilters = !!search || schemeFilters.length > 0 || categoryFilters.length > 0
+  const hasFilters = !!search || !!dateFrom || !!dateTo
+    || schemeFilters.length > 0 || categoryFilters.length > 0
     || conditionFilters.length > 0 || installedOnly || returnedOnly || transferredOnly;
 
+  /** The sheet carries whatever the table is showing, in the same order. */
   const exportExcel = () => {
-    const sheet = rows.map((row, index) => ({
-      '#': index + 1,
-      'Item Code': row.itemCode,
-      'Description': row.itemDescription,
-      'Unit': row.unit,
-      'Condition': titleCase(row.condition),
-      'Scheme': row.schemeNo,
-      'Serial No.': row.serialNumber,
-      'In Stock': row.opening,
-      'Assigned': row.assigned,
-      'Installed (MIC)': row.installed,
-      'Returned (RTN)': row.returned,
-      'Transferred (TRF)': row.transferred,
-      'Still Out': row.closing,
-      'ASN Forms': row.assignmentNos.join(', '),
-    }));
+    const sheet = rows.map((row, index) => {
+      const record: Record<string, string | number> = {
+        '#': index + 1,
+        'Item Code': row.itemCode,
+        'Description': row.itemDescription,
+        'Unit': row.unit,
+        'Condition': titleCase(row.condition),
+        'Scheme': row.schemeNo,
+        'Serial No.': row.serialNumber,
+        'Assigned': row.assigned,
+      };
+      if (visibleColumns.installed) record['Installed (MIC)'] = row.installed;
+      if (visibleColumns.returned) record['Returned (RTN)'] = row.returned;
+      if (visibleColumns.transferred) record['Transferred (TRF)'] = row.transferred;
+      record['Still Out'] = row.closing;
+      record['ASN Forms'] = row.assignmentNos.join(', ');
+      return record;
+    });
 
     const worksheet = XLSX.utils.json_to_sheet(sheet);
     const workbook = XLSX.utils.book_new();
@@ -347,9 +393,15 @@ export default function AssignedUsedReport() {
 
     const statsEndY = drawStatBoxes(doc, chrome, chrome.contentY + 2.5, [
       { label: 'ASSIGNED', value: totals.assigned.toLocaleString(), color: [107, 47, 217] },
-      { label: 'INSTALLED (MIC)', value: totals.installed.toLocaleString(), color: [0, 150, 80] },
-      { label: 'RETURNED (RTN)', value: totals.returned.toLocaleString(), color: [0, 136, 204] },
-      { label: 'TRANSFERRED (TRF)', value: totals.transferred.toLocaleString(), color: [0, 150, 190] },
+      ...(visibleColumns.installed
+        ? [{ label: 'INSTALLED (MIC)', value: totals.installed.toLocaleString(), color: [0, 150, 80] as [number, number, number] }]
+        : []),
+      ...(visibleColumns.returned
+        ? [{ label: 'RETURNED (RTN)', value: totals.returned.toLocaleString(), color: [0, 136, 204] as [number, number, number] }]
+        : []),
+      ...(visibleColumns.transferred
+        ? [{ label: 'TRANSFERRED (TRF)', value: totals.transferred.toLocaleString(), color: [0, 150, 190] as [number, number, number] }]
+        : []),
       { label: 'STILL OUT', value: totals.closing.toLocaleString(), color: [26, 26, 62] },
     ]);
 
@@ -359,10 +411,46 @@ export default function AssignedUsedReport() {
     doc.setTextColor(26, 26, 62);
     doc.text('ISSUED ITEMS', marginL, tableLabelY);
 
+    /**
+     * The three follow-up columns, in table order, each carrying its own head,
+     * cell, total and ink — so the table is assembled from whichever of them
+     * survived `visibleColumns` rather than described three times over.
+     */
+    const followUp = [
+      {
+        show: visibleColumns.installed,
+        head: 'Installed',
+        cell: (row: IssuedRow) => row.installed,
+        total: totals.installed,
+        color: [0, 150, 80] as [number, number, number],
+      },
+      {
+        show: visibleColumns.returned,
+        head: 'Returned',
+        cell: (row: IssuedRow) => row.returned,
+        total: totals.returned,
+        color: [0, 136, 204] as [number, number, number],
+      },
+      {
+        show: visibleColumns.transferred,
+        head: 'Transferred',
+        cell: (row: IssuedRow) => row.transferred,
+        total: totals.transferred,
+        color: [0, 150, 190] as [number, number, number],
+      },
+    ].filter(column => column.show);
+
+    // Widths sum to contentW (269mm), so the table spans the same band as the
+    // title bar and the stats row. Everything but Description is fixed, and
+    // Description takes whatever the hidden columns gave back — it is the one
+    // column with something to do with the space.
+    const fixedW = 8 + 31 + 14 + 18 + 32 + 20 + 18;   // # code unit cond scheme assigned still-out
+    const descW = chrome.contentW - fixedW - followUp.length * 20;
+
     autoTable(doc, {
       startY: tableLabelY + 3,
       head: [['#', 'Item Code', 'Description', 'Unit', 'Condition', 'Scheme',
-        'In Stock', 'Assigned', 'Installed', 'Returned', 'Transferred', 'Still Out']],
+        'Assigned', ...followUp.map(c => c.head), 'Still Out']],
       body: [
         ...rows.map((row, index) => [
           index + 1,
@@ -371,19 +459,15 @@ export default function AssignedUsedReport() {
           row.unit || '—',
           titleCase(row.condition) || '—',
           row.schemeNo || '—',
-          row.opening || '—',
           row.assigned > 0 ? String(row.assigned) : '—',
-          row.installed > 0 ? String(row.installed) : '—',
-          row.returned > 0 ? String(row.returned) : '—',
-          // No arrow glyph here, unlike on screen: jsPDF's built-in helvetica is
-          // WinAnsi, which has no U+2194, and an unmapped code point prints as
-          // a stray character rather than as nothing.
-          row.transferred > 0 ? String(row.transferred) : '—',
+          // No arrow glyph on the transferred figure here, unlike on screen:
+          // jsPDF's built-in helvetica is WinAnsi, which has no U+2194, and an
+          // unmapped code point prints as a stray character rather than nothing.
+          ...followUp.map(c => (c.cell(row) > 0 ? String(c.cell(row)) : '—')),
           row.closing,
         ]),
         ['', `TOTAL (${rows.length} items)`, '', '', '', '',
-          '—', totals.assigned, totals.installed, totals.returned,
-          totals.transferred, totals.closing],
+          totals.assigned, ...followUp.map(c => c.total), totals.closing],
       ],
       styles: { fontSize: 7.5, cellPadding: 2 },
       headStyles: {
@@ -393,21 +477,20 @@ export default function AssignedUsedReport() {
         fontSize: 7.5,
         halign: 'center',
       },
-      // Widths sum to contentW (269mm), so the table spans the same band as the
-      // title bar and the stats row: 8+28+58+14+18+27+18+20+20+20+20+18.
       columnStyles: {
         0: { cellWidth: 8, halign: 'center' },
-        1: { cellWidth: 28, font: 'courier', fontSize: 7 },
-        2: { cellWidth: 58 },
+        1: { cellWidth: 31, font: 'courier', fontSize: 7 },
+        2: { cellWidth: descW },
         3: { cellWidth: 14, halign: 'center' },
         4: { cellWidth: 18, halign: 'center' },
-        5: { cellWidth: 27 },
-        6: { cellWidth: 18, halign: 'center' },
-        7: { cellWidth: 20, halign: 'center', textColor: [107, 47, 217] },
-        8: { cellWidth: 20, halign: 'center', textColor: [0, 150, 80] },
-        9: { cellWidth: 20, halign: 'center', textColor: [0, 136, 204] },
-        10: { cellWidth: 20, halign: 'center', textColor: [0, 150, 190] },
-        11: { cellWidth: 18, halign: 'center', fontStyle: 'bold' },
+        5: { cellWidth: 32 },
+        6: { cellWidth: 20, halign: 'center', textColor: [107, 47, 217] },
+        // The follow-up columns start at 7 and run as far as they were kept;
+        // Still Out closes the row whichever index that lands on.
+        ...Object.fromEntries(followUp.map((column, i) => [
+          7 + i, { cellWidth: 20, halign: 'center', textColor: column.color },
+        ])),
+        [7 + followUp.length]: { cellWidth: 18, halign: 'center', fontStyle: 'bold' },
       },
       alternateRowStyles: { fillColor: [248, 248, 252] },
       didParseCell: (data) => {
@@ -426,9 +509,10 @@ export default function AssignedUsedReport() {
 
     const notes = [
       'Still Out = Assigned − Installed − Returned. Transferred is not subtracted: a transfer hands the stock to another holder rather than ending its life outside the warehouse.',
-      'In Stock is the item’s current available quantity on the shelf, not a period opening. Every other figure is derived from issued ASN, approved MIC / RTN and completed TRF documents.',
+      'Every figure is derived from documents: issued ASN forms, approved MIC and RTN documents, completed TRF documents. A date range narrows the hand-outs, not what became of them.',
     ];
     const filterParts = [];
+    if (dateFrom || dateTo) filterParts.push(`Issued: ${dateFrom || 'All'} → ${dateTo || 'Today'}`);
     if (schemeFilters.length > 0) filterParts.push(`Schemes: ${schemeFilters.join(', ')}`);
     if (categoryFilters.length > 0) filterParts.push(`Categories: ${categoryFilters.join(', ')}`);
     if (conditionFilters.length > 0) filterParts.push(`Condition: ${conditionFilters.map(titleCase).join(', ')}`);
@@ -494,12 +578,13 @@ export default function AssignedUsedReport() {
         </div>
       </div>
 
-      {/* Summary Cards */}
-      <div style={{ display: 'flex', gap: 12, marginBottom: 20 }}>
+      {/* Summary Cards. Assigned and Still Out are the two ends of every row and
+          always stand; the three in between come and go with their columns. */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginBottom: 20 }}>
         {statCard('Assigned', totals.assigned, 'var(--purple)', 'var(--purple-dim)')}
-        {statCard('Installed (MIC)', totals.installed, 'var(--green)', 'var(--green-dim)')}
-        {statCard('Returned (RTN)', totals.returned, 'var(--accent)', 'var(--accent-dim)')}
-        {statCard('Transferred (TRF)', totals.transferred, 'var(--blue)', 'var(--blue-dim)')}
+        {visibleColumns.installed && statCard('Installed (MIC)', totals.installed, 'var(--green)', 'var(--green-dim)')}
+        {visibleColumns.returned && statCard('Returned (RTN)', totals.returned, 'var(--accent)', 'var(--accent-dim)')}
+        {visibleColumns.transferred && statCard('Transferred (TRF)', totals.transferred, 'var(--blue)', 'var(--blue-dim)')}
         {statCard('Still Out', totals.closing, 'var(--yellow)', 'var(--yellow-dim)')}
       </div>
 
@@ -536,6 +621,45 @@ export default function AssignedUsedReport() {
           )}
         </div>
 
+        {/* When the stock went out. Left empty by default: the tab's own
+            question is what is still owed back, which has no natural period. */}
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginTop: 12 }}>
+          <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.06em', minWidth: 84 }}>
+            Issued
+          </span>
+          <div style={{ position: 'relative' }}>
+            <Calendar size={13} style={{ position: 'absolute', left: 9, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-3)', pointerEvents: 'none' }} />
+            <input
+              type="date"
+              className="form-input"
+              style={{ width: 165, paddingLeft: 28 }}
+              value={dateFrom}
+              onChange={e => setDateFrom(e.target.value)}
+              max={dateTo || undefined}
+            />
+          </div>
+          <span style={{ fontSize: 12, color: 'var(--text-3)' }}>to</span>
+          <div style={{ position: 'relative' }}>
+            <Calendar size={13} style={{ position: 'absolute', left: 9, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-3)', pointerEvents: 'none' }} />
+            <input
+              type="date"
+              className="form-input"
+              style={{ width: 165, paddingLeft: 28 }}
+              value={dateTo}
+              onChange={e => setDateTo(e.target.value)}
+              min={dateFrom || undefined}
+            />
+          </div>
+          {(dateFrom || dateTo) && (
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={() => { setDateFrom(''); setDateTo(''); }}
+            >
+              Clear dates
+            </button>
+          )}
+        </div>
+
         <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginTop: 12 }}>
           <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.06em', minWidth: 84 }}>
             Condition
@@ -561,6 +685,7 @@ export default function AssignedUsedReport() {
             {schemeFilters.length > 0 && ` · Schemes: ${schemeFilters.join(', ')}`}
             {categoryFilters.length > 0 && ` · Categories: ${categoryFilters.join(', ')}`}
             {conditionFilters.length > 0 && ` · Condition: ${conditionFilters.map(titleCase).join(', ')}`}
+            {(dateFrom || dateTo) && ` · Issued: ${dateFrom || 'All'} → ${dateTo || 'today'}`}
           </div>
         )}
       </div>
@@ -584,11 +709,16 @@ export default function AssignedUsedReport() {
                 <th>Condition</th>
                 <th>Scheme</th>
                 <th>Serial No.</th>
-                <th style={{ textAlign: 'center', background: 'var(--bg-3)' }}>In Stock</th>
                 <th style={{ textAlign: 'center', color: 'var(--purple)' }}>Assigned</th>
-                <th style={{ textAlign: 'center', color: 'var(--green)' }}>Installed</th>
-                <th style={{ textAlign: 'center', color: 'var(--accent)' }}>Returned</th>
-                <th style={{ textAlign: 'center', color: 'var(--blue)' }}>Transferred</th>
+                {visibleColumns.installed && (
+                  <th style={{ textAlign: 'center', color: 'var(--green)' }}>Installed</th>
+                )}
+                {visibleColumns.returned && (
+                  <th style={{ textAlign: 'center', color: 'var(--accent)' }}>Returned</th>
+                )}
+                {visibleColumns.transferred && (
+                  <th style={{ textAlign: 'center', color: 'var(--blue)' }}>Transferred</th>
+                )}
                 <th style={{ textAlign: 'center', color: 'var(--yellow)' }}>Still Out</th>
               </tr>
             </thead>
@@ -617,19 +747,24 @@ export default function AssignedUsedReport() {
                   <td style={{ fontSize: 12, color: 'var(--text-2)' }}>
                     <SerialNumbers value={row.serialNumber} />
                   </td>
-                  <td style={{ textAlign: 'center', fontWeight: 600 }}>{row.opening || '—'}</td>
                   <td style={{ textAlign: 'center', fontWeight: 700, color: row.assigned > 0 ? 'var(--purple)' : 'var(--text-3)' }}>
                     {row.assigned > 0 ? row.assigned : '—'}
                   </td>
-                  <td style={{ textAlign: 'center', fontWeight: 700, color: row.installed > 0 ? 'var(--green)' : 'var(--text-3)' }}>
-                    {row.installed > 0 ? row.installed : '—'}
-                  </td>
-                  <td style={{ textAlign: 'center', fontWeight: 700, color: row.returned > 0 ? 'var(--accent)' : 'var(--text-3)' }}>
-                    {row.returned > 0 ? `↩ ${row.returned}` : '—'}
-                  </td>
-                  <td style={{ textAlign: 'center', fontWeight: row.transferred > 0 ? 700 : 400, color: row.transferred > 0 ? 'var(--blue)' : 'var(--text-3)' }}>
-                    {row.transferred > 0 ? `↔ ${row.transferred}` : '—'}
-                  </td>
+                  {visibleColumns.installed && (
+                    <td style={{ textAlign: 'center', fontWeight: 700, color: row.installed > 0 ? 'var(--green)' : 'var(--text-3)' }}>
+                      {row.installed > 0 ? row.installed : '—'}
+                    </td>
+                  )}
+                  {visibleColumns.returned && (
+                    <td style={{ textAlign: 'center', fontWeight: 700, color: row.returned > 0 ? 'var(--accent)' : 'var(--text-3)' }}>
+                      {row.returned > 0 ? `↩ ${row.returned}` : '—'}
+                    </td>
+                  )}
+                  {visibleColumns.transferred && (
+                    <td style={{ textAlign: 'center', fontWeight: row.transferred > 0 ? 700 : 400, color: row.transferred > 0 ? 'var(--blue)' : 'var(--text-3)' }}>
+                      {row.transferred > 0 ? `↔ ${row.transferred}` : '—'}
+                    </td>
+                  )}
                   <td style={{ textAlign: 'center', fontWeight: 800, fontSize: 15, color: row.closing > 0 ? 'var(--yellow)' : 'var(--green)' }}>
                     {row.closing}
                   </td>
@@ -641,13 +776,18 @@ export default function AssignedUsedReport() {
                 <td colSpan={7} style={{ padding: '10px 16px', color: 'var(--text-2)', textTransform: 'uppercase', letterSpacing: '0.05em', fontSize: 11 }}>
                   Total ({rows.length} items)
                 </td>
-                <td style={{ textAlign: 'center', padding: '10px 16px', color: 'var(--text-3)' }}>—</td>
                 <td style={{ textAlign: 'center', padding: '10px 16px', color: 'var(--purple)' }}>{totals.assigned}</td>
-                <td style={{ textAlign: 'center', padding: '10px 16px', color: 'var(--green)' }}>{totals.installed}</td>
-                <td style={{ textAlign: 'center', padding: '10px 16px', color: 'var(--accent)' }}>{totals.returned}</td>
-                <td style={{ textAlign: 'center', padding: '10px 16px', color: 'var(--blue)' }}>
-                  {totals.transferred > 0 ? `↔ ${totals.transferred}` : '—'}
-                </td>
+                {visibleColumns.installed && (
+                  <td style={{ textAlign: 'center', padding: '10px 16px', color: 'var(--green)' }}>{totals.installed}</td>
+                )}
+                {visibleColumns.returned && (
+                  <td style={{ textAlign: 'center', padding: '10px 16px', color: 'var(--accent)' }}>{totals.returned}</td>
+                )}
+                {visibleColumns.transferred && (
+                  <td style={{ textAlign: 'center', padding: '10px 16px', color: 'var(--blue)' }}>
+                    {totals.transferred > 0 ? `↔ ${totals.transferred}` : '—'}
+                  </td>
+                )}
                 <td style={{ textAlign: 'center', padding: '10px 16px', color: 'var(--yellow)', fontSize: 16 }}>{totals.closing}</td>
               </tr>
             </tfoot>
@@ -658,7 +798,7 @@ export default function AssignedUsedReport() {
       {/* Legend */}
       <div style={{ marginTop: 16, padding: '12px 16px', background: 'var(--bg-2)', borderRadius: 'var(--radius)', border: '1px solid var(--border)', fontSize: 12, color: 'var(--text-3)' }}>
         <strong style={{ color: 'var(--text-2)' }}>How it works:</strong>
-        {' '}One row per item, rolled up across every issued Assignment Form that named it. Assigned = handed out on issued ASN forms · Installed = fitted on approved MIC forms · Returned = brought back on approved RTN documents · Transferred = moved to another holder or site on completed TRF documents · <strong style={{ color: 'var(--text-2)' }}>Still Out = Assigned − Installed − Returned</strong>. Transferred is not subtracted: a transfer hands the stock to someone else rather than ending its life outside the warehouse, so it is still out. <strong style={{ color: 'var(--text-2)' }}>In Stock</strong> is the item's current available quantity on the shelf — the one live figure here, and not a period opening.
+        {' '}One row per item, rolled up across every issued Assignment Form that named it. Assigned = handed out on issued ASN forms · Installed = fitted on approved MIC forms · Returned = brought back on approved RTN documents · Transferred = moved to another holder or site on completed TRF documents · <strong style={{ color: 'var(--text-2)' }}>Still Out = Assigned − Installed − Returned</strong>. Transferred is not subtracted: a transfer hands the stock to someone else rather than ending its life outside the warehouse, so it is still out. A date range narrows the hand-outs, not what became of them: a form issued in June stays in scope along with the installation or return booked against its stock in August.
       </div>
     </div>
   );

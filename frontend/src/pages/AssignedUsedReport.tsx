@@ -42,7 +42,11 @@ interface RtnLine { itemCode?: string; qtyReturned?: number; itemId?: string }
 interface RtnForm { id: string; status: string; returnedById?: string; items?: RtnLine[] }
 
 interface TrfLine { itemCode?: string; qtyToTransfer?: number; itemId?: string }
-interface TrfForm { id: string; status: string; issuedById?: string; items?: TrfLine[] }
+interface TrfForm {
+  id: string; status: string;
+  issuedById?: string; receivedById?: string;
+  items?: TrfLine[];
+}
 
 interface InvItem {
   id: string; name: string; sku: string;
@@ -67,8 +71,17 @@ interface IssuedRow {
   installed: number;
   /** Brought back on approved RTN documents. */
   returned: number;
-  /** Moved between holders or sites on completed TRF documents. */
-  transferred: number;
+  /**
+   * The two ends of a completed TRF, kept apart because they are opposite
+   * events: `transferOut` is what the holder handed on (they are the form's
+   * "Issued By"), `transferIn` what they took over (its "Received By").
+   *
+   * With no worker selected every transfer is both — one person's out is
+   * another's in — so the two columns read the same total. Select a worker and
+   * they separate into what that person let go of and what landed on them.
+   */
+  transferOut: number;
+  transferIn: number;
   /**
    * What is still out and unaccounted for: assigned, less installed, returned
    * and transferred.
@@ -149,6 +162,8 @@ export default function AssignedUsedReport() {
   const [installedOnly, setInstalledOnly] = useState(false);
   const [returnedOnly, setReturnedOnly] = useState(false);
   const [transferredOnly, setTransferredOnly] = useState(false);
+  const [transferOutOnly, setTransferOutOnly] = useState(false);
+  const [transferInOnly, setTransferInOnly] = useState(false);
 
   const allRows = useMemo((): IssuedRow[] => {
     // The range narrows the hand-outs, not what became of them: a form issued
@@ -239,7 +254,8 @@ export default function AssignedUsedReport() {
             assigned: 0,
             installed: 0,
             returned: 0,
-            transferred: 0,
+            transferOut: 0,
+            transferIn: 0,
             closing: 0,
             assignmentNos: [],
             assignedToIds: [],
@@ -310,19 +326,29 @@ export default function AssignedUsedReport() {
     }
 
     // Moved on. Only completed transfers: nothing has moved until then.
-    for (const trf of (transferFormsData as TrfForm[]).filter(t =>
-      t.status === 'completed' && (!workerFilter || t.issuedById === workerFilter))) {
+    for (const trf of (transferFormsData as TrfForm[]).filter(t => t.status === 'completed')) {
+      // Which end of this transfer the report is standing at. With no worker
+      // selected it stands at both, which is why the two totals agree.
+      const out = !workerFilter || trf.issuedById === workerFilter;
+      const into = !workerFilter || trf.receivedById === workerFilter;
+      if (!out && !into) continue;
+
       for (const line of trf.items ?? []) {
         const qty = line.qtyToTransfer ?? 0;
         if (!line.itemCode?.trim() || qty <= 0) continue;
         const row = resolve(line);
-        if (row) row.transferred += qty;
+        if (!row) continue;
+        if (out) row.transferOut += qty;
+        if (into) row.transferIn += qty;
       }
     }
 
     return [...rows.values()].map(row => ({
       ...row,
-      closing: Math.max(0, row.assigned - row.installed - row.returned - row.transferred),
+      // Only the outgoing side comes off. Stock transferred *in* arrived on
+      // somebody else's assignment form and is already accounted for on their
+      // row; adding it here would count the same units on two rows at once.
+      closing: Math.max(0, row.assigned - row.installed - row.returned - row.transferOut),
     }));
   }, [formsData, inventoryData, micData, rtnData, transferFormsData, dateFrom, dateTo, workerFilter]);
 
@@ -352,11 +378,13 @@ export default function AssignedUsedReport() {
       // alone, so every row reaching this point is already theirs.
       if (installedOnly && row.installed <= 0) return false;
       if (returnedOnly && row.returned <= 0) return false;
-      if (transferredOnly && row.transferred <= 0) return false;
+      if (transferredOnly && row.transferOut <= 0 && row.transferIn <= 0) return false;
+      if (transferOutOnly && row.transferOut <= 0) return false;
+      if (transferInOnly && row.transferIn <= 0) return false;
       return true;
     });
   }, [allRows, search, schemeFilters, categoryFilters, conditionFilters,
-    installedOnly, returnedOnly, transferredOnly]);
+    installedOnly, returnedOnly, transferredOnly, transferOutOnly, transferInOnly]);
 
   /**
    * Which of the three follow-up columns to show.
@@ -380,7 +408,8 @@ export default function AssignedUsedReport() {
     assigned: rows.reduce((sum, r) => sum + r.assigned, 0),
     installed: rows.reduce((sum, r) => sum + r.installed, 0),
     returned: rows.reduce((sum, r) => sum + r.returned, 0),
-    transferred: rows.reduce((sum, r) => sum + r.transferred, 0),
+    transferOut: rows.reduce((sum, r) => sum + r.transferOut, 0),
+    transferIn: rows.reduce((sum, r) => sum + r.transferIn, 0),
     closing: rows.reduce((sum, r) => sum + r.closing, 0),
     forms: new Set(rows.flatMap(r => r.assignmentNos)).size,
   }), [rows]);
@@ -389,10 +418,12 @@ export default function AssignedUsedReport() {
     setSearch(''); setDateFrom(''); setDateTo(''); setWorkerFilter('');
     setSchemeFilters([]); setCategoryFilters([]); setConditionFilters([]);
     setInstalledOnly(false); setReturnedOnly(false); setTransferredOnly(false);
+    setTransferOutOnly(false); setTransferInOnly(false);
   };
   const hasFilters = !!search || !!dateFrom || !!dateTo || !!workerFilter
     || schemeFilters.length > 0 || categoryFilters.length > 0
-    || conditionFilters.length > 0 || installedOnly || returnedOnly || transferredOnly;
+    || conditionFilters.length > 0 || installedOnly || returnedOnly || transferredOnly
+    || transferOutOnly || transferInOnly;
 
   /** The sheet carries whatever the table is showing, in the same order. */
   const exportExcel = () => {
@@ -409,7 +440,10 @@ export default function AssignedUsedReport() {
       };
       if (visibleColumns.installed) record['Installed (MIC)'] = row.installed;
       if (visibleColumns.returned) record['Returned (RTN)'] = row.returned;
-      if (visibleColumns.transferred) record['Transferred (TRF)'] = row.transferred;
+      if (visibleColumns.transferred) {
+        record['Transfer Out (TRF)'] = row.transferOut;
+        record['Transfer In (TRF)'] = row.transferIn;
+      }
       record['Still Out'] = row.closing;
       record['ASN Forms'] = row.assignmentNos.join(', ');
       return record;
@@ -447,7 +481,10 @@ export default function AssignedUsedReport() {
         ? [{ label: 'RETURNED (RTN)', value: totals.returned.toLocaleString(), color: [0, 136, 204] as [number, number, number] }]
         : []),
       ...(visibleColumns.transferred
-        ? [{ label: 'TRANSFERRED (TRF)', value: totals.transferred.toLocaleString(), color: [0, 150, 190] as [number, number, number] }]
+        ? [
+          { label: 'TRANSFER OUT', value: totals.transferOut.toLocaleString(), color: [200, 100, 0] as [number, number, number] },
+          { label: 'TRANSFER IN', value: totals.transferIn.toLocaleString(), color: [0, 150, 190] as [number, number, number] },
+        ]
         : []),
       { label: 'STILL OUT', value: totals.closing.toLocaleString(), color: [26, 26, 62] },
     ]);
@@ -480,9 +517,16 @@ export default function AssignedUsedReport() {
       },
       {
         show: visibleColumns.transferred,
-        head: 'Transferred',
-        cell: (row: IssuedRow) => row.transferred,
-        total: totals.transferred,
+        head: 'Transfer Out',
+        cell: (row: IssuedRow) => row.transferOut,
+        total: totals.transferOut,
+        color: [200, 100, 0] as [number, number, number],
+      },
+      {
+        show: visibleColumns.transferred,
+        head: 'Transfer In',
+        cell: (row: IssuedRow) => row.transferIn,
+        total: totals.transferIn,
         color: [0, 150, 190] as [number, number, number],
       },
     ].filter(column => column.show);
@@ -507,7 +551,7 @@ export default function AssignedUsedReport() {
           titleCase(row.condition) || '—',
           row.schemeNo || '—',
           row.assigned > 0 ? String(row.assigned) : '—',
-          // No arrow glyph on the transferred figure here, unlike on screen:
+          // No arrow glyphs on the transfer figures here, unlike on screen:
           // jsPDF's built-in helvetica is WinAnsi, which has no U+2194, and an
           // unmapped code point prints as a stray character rather than nothing.
           ...followUp.map(c => (c.cell(row) > 0 ? String(c.cell(row)) : '—')),
@@ -555,7 +599,7 @@ export default function AssignedUsedReport() {
     });
 
     const notes = [
-      'Still Out = Assigned − Installed − Returned − Transferred: what the holder has yet to account for, a transfer being one of the ways they account for it.',
+      'Still Out = Assigned − Installed − Returned − Transfer Out: what the holder has yet to account for. Transfer In is not added — that stock is accounted for on the row of whoever it was assigned to.',
       'Every figure is derived from documents: issued ASN forms, approved MIC and RTN documents, completed TRF documents. A date range narrows the hand-outs, not what became of them.',
     ];
     const filterParts = [];
@@ -566,6 +610,8 @@ export default function AssignedUsedReport() {
     if (installedOnly) filterParts.push('Installed only');
     if (returnedOnly) filterParts.push('Returned only');
     if (transferredOnly) filterParts.push('Transferred only');
+    if (transferOutOnly) filterParts.push('Transfer out only');
+    if (transferInOnly) filterParts.push('Transfer in only');
     if (search) filterParts.push(`Search: "${search}"`);
     if (filterParts.length > 0) notes.push(`Filters applied: ${filterParts.join(' · ')}`);
 
@@ -631,7 +677,8 @@ export default function AssignedUsedReport() {
         {statCard('Assigned', totals.assigned, 'var(--purple)', 'var(--purple-dim)')}
         {visibleColumns.installed && statCard('Installed (MIC)', totals.installed, 'var(--green)', 'var(--green-dim)')}
         {visibleColumns.returned && statCard('Returned (RTN)', totals.returned, 'var(--accent)', 'var(--accent-dim)')}
-        {visibleColumns.transferred && statCard('Transferred (TRF)', totals.transferred, 'var(--blue)', 'var(--blue-dim)')}
+        {visibleColumns.transferred && statCard('Transfer Out', totals.transferOut, 'var(--yellow)', 'var(--yellow-dim)')}
+        {visibleColumns.transferred && statCard('Transfer In', totals.transferIn, 'var(--blue)', 'var(--blue-dim)')}
         {statCard('Still Out', totals.closing, 'var(--yellow)', 'var(--yellow-dim)')}
       </div>
 
@@ -736,6 +783,8 @@ export default function AssignedUsedReport() {
           {toggle('Installed items only', installedOnly, setInstalledOnly)}
           {toggle('Returned items only', returnedOnly, setReturnedOnly)}
           {toggle('Transferred items only', transferredOnly, setTransferredOnly)}
+          {toggle('Transfer out only', transferOutOnly, setTransferOutOnly)}
+          {toggle('Transfer in only', transferInOnly, setTransferInOnly)}
         </div>
 
         {hasFilters && (
@@ -782,7 +831,10 @@ export default function AssignedUsedReport() {
                   <th style={{ textAlign: 'center', color: 'var(--accent)' }}>Returned</th>
                 )}
                 {visibleColumns.transferred && (
-                  <th style={{ textAlign: 'center', color: 'var(--blue)' }}>Transferred</th>
+                  <>
+                    <th style={{ textAlign: 'center', color: 'var(--yellow)' }}>Transfer Out</th>
+                    <th style={{ textAlign: 'center', color: 'var(--blue)' }}>Transfer In</th>
+                  </>
                 )}
                 <th style={{ textAlign: 'center', color: 'var(--yellow)' }}>Still Out</th>
               </tr>
@@ -831,9 +883,14 @@ export default function AssignedUsedReport() {
                     </td>
                   )}
                   {visibleColumns.transferred && (
-                    <td style={{ textAlign: 'center', fontWeight: row.transferred > 0 ? 700 : 400, color: row.transferred > 0 ? 'var(--blue)' : 'var(--text-3)' }}>
-                      {row.transferred > 0 ? `↔ ${row.transferred}` : '—'}
-                    </td>
+                    <>
+                      <td style={{ textAlign: 'center', fontWeight: row.transferOut > 0 ? 700 : 400, color: row.transferOut > 0 ? 'var(--yellow)' : 'var(--text-3)' }}>
+                        {row.transferOut > 0 ? `↑ ${row.transferOut}` : '—'}
+                      </td>
+                      <td style={{ textAlign: 'center', fontWeight: row.transferIn > 0 ? 700 : 400, color: row.transferIn > 0 ? 'var(--blue)' : 'var(--text-3)' }}>
+                        {row.transferIn > 0 ? `↓ ${row.transferIn}` : '—'}
+                      </td>
+                    </>
                   )}
                   <td style={{ textAlign: 'center', fontWeight: 800, fontSize: 15, color: row.closing > 0 ? 'var(--yellow)' : 'var(--green)' }}>
                     {row.closing}
@@ -854,9 +911,14 @@ export default function AssignedUsedReport() {
                   <td style={{ textAlign: 'center', padding: '10px 16px', color: 'var(--accent)' }}>{totals.returned}</td>
                 )}
                 {visibleColumns.transferred && (
-                  <td style={{ textAlign: 'center', padding: '10px 16px', color: 'var(--blue)' }}>
-                    {totals.transferred > 0 ? `↔ ${totals.transferred}` : '—'}
-                  </td>
+                  <>
+                    <td style={{ textAlign: 'center', padding: '10px 16px', color: 'var(--yellow)' }}>
+                      {totals.transferOut > 0 ? `↑ ${totals.transferOut}` : '—'}
+                    </td>
+                    <td style={{ textAlign: 'center', padding: '10px 16px', color: 'var(--blue)' }}>
+                      {totals.transferIn > 0 ? `↓ ${totals.transferIn}` : '—'}
+                    </td>
+                  </>
                 )}
                 <td style={{ textAlign: 'center', padding: '10px 16px', color: 'var(--yellow)', fontSize: 16 }}>{totals.closing}</td>
               </tr>
@@ -868,7 +930,7 @@ export default function AssignedUsedReport() {
       {/* Legend */}
       <div style={{ marginTop: 16, padding: '12px 16px', background: 'var(--bg-2)', borderRadius: 'var(--radius)', border: '1px solid var(--border)', fontSize: 12, color: 'var(--text-3)' }}>
         <strong style={{ color: 'var(--text-2)' }}>How it works:</strong>
-        {' '}One row per item, rolled up across every issued Assignment Form that named it. Assigned = handed out on issued ASN forms · Installed = fitted on approved MIC forms · Returned = brought back on approved RTN documents · Transferred = moved to another holder or site on completed TRF documents · <strong style={{ color: 'var(--text-2)' }}>Still Out = Assigned − Installed − Returned − Transferred</strong>: what the holder has yet to account for, a transfer being one of the ways they account for it. A date range narrows the hand-outs, not what became of them: a form issued in June stays in scope along with the installation or return booked against its stock in August.
+        {' '}One row per item, rolled up across every issued Assignment Form that named it. Assigned = handed out on issued ASN forms · Installed = fitted on approved MIC forms · Returned = brought back on approved RTN documents · Transfer Out = handed on to another holder on a completed TRF, Transfer In = taken over from one · <strong style={{ color: 'var(--text-2)' }}>Still Out = Assigned − Installed − Returned − Transfer Out</strong>: what the holder has yet to account for, handing stock on being one of the ways they account for it. Transfer In is not added — that stock arrived on somebody else's assignment form and is accounted for on their row. Pick a worker and the two transfer columns separate into what they let go of and what landed on them; with nobody picked every transfer is both, so the two totals agree. A date range narrows the hand-outs, not what became of them: a form issued in June stays in scope along with the installation or return booked against its stock in August.
       </div>
     </div>
   );

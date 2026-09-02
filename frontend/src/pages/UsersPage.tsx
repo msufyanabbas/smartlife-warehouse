@@ -184,14 +184,23 @@ export default function UsersPage() {
 
   const handleUpdate = async () => {
     if (!editTarget) return;
+    // Both columns are NOT NULL, so a blank name is caught here as well as by
+    // the server — the same check the create dialog already makes.
+    if (!editForm.firstName?.trim() || !editForm.lastName?.trim()) {
+      alert('Please fill in all required fields (First Name, Last Name)');
+      return;
+    }
     await updateUser.mutateAsync({
       id: editTarget.id,
       data: {
         firstName: editForm.firstName,
         lastName: editForm.lastName,
         role: editForm.role,
-        department: editForm.department || undefined,
-        phone: editForm.phone || undefined,
+        // Sent as '' rather than dropped when emptied. An omitted key never
+        // reaches the server's update, so clearing either of these was
+        // impossible; both columns are nullable and '' clears them.
+        department: editForm.department ?? '',
+        phone: editForm.phone ?? '',
         isActive: editForm.isActive,
       },
     });

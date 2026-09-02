@@ -40,13 +40,24 @@ export class UsersService {
 
   async update(id: string, dto: UpdateUserDto) {
     await this.findOne(id); // ensure it exists
-    // Direct SQL UPDATE — include empty strings (clear the field), skip only undefined
-    const updateData: any = {};
+
+    // Direct SQL UPDATE — skip only undefined, so an empty string still reaches
+    // the column and clears it.
+    //
+    // Except where the column cannot be null. Blanking `department` is a request
+    // to erase it; blanking `firstName` used to send NULL at a NOT NULL column,
+    // and the driver's error is not an HttpException, so the whole request came
+    // back as a 500. Nullability is read off the entity metadata rather than
+    // listed here, so a column added later cannot quietly reintroduce it.
+    // (`firstName`/`lastName` are also rejected as empty by the DTO, which turns
+    // the same mistake into a 400 that says what is wrong.)
+    const updateData: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(dto)) {
-      if (value !== undefined) {
-        updateData[key] = value === '' ? null : value;
-      }
+      if (value === undefined) continue;
+      const column = this.userRepository.metadata.findColumnWithPropertyName(key);
+      updateData[key] = value === '' && column?.isNullable ? null : value;
     }
+
     await this.userRepository.update(id, updateData);
     return this.findOne(id);
   }

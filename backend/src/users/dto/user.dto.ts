@@ -4,6 +4,7 @@ import {
   IsOptional,
   IsEnum,
   IsBoolean,
+  IsNotEmpty,
   MinLength,
 } from 'class-validator';
 import { Role } from '../../common/enums/role.enum';
@@ -36,12 +37,16 @@ export class CreateUserDto {
 }
 
 export class UpdateUserDto {
+  // Optional to send, but not optional to blank: both back NOT NULL columns, so
+  // an empty one has to be turned away here rather than at the driver.
   @IsOptional()
   @IsString()
+  @IsNotEmpty({ message: 'First name cannot be empty' })
   firstName?: string;
 
   @IsOptional()
   @IsString()
+  @IsNotEmpty({ message: 'Last name cannot be empty' })
   lastName?: string;
 
   @IsOptional()

@@ -70,13 +70,15 @@ interface IssuedRow {
   /** Moved between holders or sites on completed TRF documents. */
   transferred: number;
   /**
-   * What is still out with a holder: assigned less installed less returned.
+   * What is still out and unaccounted for: assigned, less installed, returned
+   * and transferred.
    *
-   * Transferred is deliberately not subtracted — a transfer hands the stock to
-   * someone else rather than ending its life outside the warehouse, so it is
-   * still out. Floored at zero: an ad-hoc return adjusts inventory without ever
-   * being written back to the ASN that issued it, so a hand-out given back that
-   * way can be netted off twice.
+   * Transferred comes off because the question this column answers is what the
+   * holder still has to account for, and a transfer is them accounting for it —
+   * the stock is someone else's to answer for from that point. Floored at zero:
+   * an ad-hoc return adjusts inventory without ever being written back to the
+   * ASN that issued it, so a hand-out given back that way can be netted off
+   * twice. Matches the Still Out column on the Stock Movement tab.
    */
   closing: number;
   /** Which ASN forms it went out on, in the order they were read. */
@@ -320,7 +322,7 @@ export default function AssignedUsedReport() {
 
     return [...rows.values()].map(row => ({
       ...row,
-      closing: Math.max(0, row.assigned - row.installed - row.returned),
+      closing: Math.max(0, row.assigned - row.installed - row.returned - row.transferred),
     }));
   }, [formsData, inventoryData, micData, rtnData, transferFormsData, dateFrom, dateTo, workerFilter]);
 
@@ -553,7 +555,7 @@ export default function AssignedUsedReport() {
     });
 
     const notes = [
-      'Still Out = Assigned − Installed − Returned. Transferred is not subtracted: a transfer hands the stock to another holder rather than ending its life outside the warehouse.',
+      'Still Out = Assigned − Installed − Returned − Transferred: what the holder has yet to account for, a transfer being one of the ways they account for it.',
       'Every figure is derived from documents: issued ASN forms, approved MIC and RTN documents, completed TRF documents. A date range narrows the hand-outs, not what became of them.',
     ];
     const filterParts = [];
@@ -866,7 +868,7 @@ export default function AssignedUsedReport() {
       {/* Legend */}
       <div style={{ marginTop: 16, padding: '12px 16px', background: 'var(--bg-2)', borderRadius: 'var(--radius)', border: '1px solid var(--border)', fontSize: 12, color: 'var(--text-3)' }}>
         <strong style={{ color: 'var(--text-2)' }}>How it works:</strong>
-        {' '}One row per item, rolled up across every issued Assignment Form that named it. Assigned = handed out on issued ASN forms · Installed = fitted on approved MIC forms · Returned = brought back on approved RTN documents · Transferred = moved to another holder or site on completed TRF documents · <strong style={{ color: 'var(--text-2)' }}>Still Out = Assigned − Installed − Returned</strong>. Transferred is not subtracted: a transfer hands the stock to someone else rather than ending its life outside the warehouse, so it is still out. A date range narrows the hand-outs, not what became of them: a form issued in June stays in scope along with the installation or return booked against its stock in August.
+        {' '}One row per item, rolled up across every issued Assignment Form that named it. Assigned = handed out on issued ASN forms · Installed = fitted on approved MIC forms · Returned = brought back on approved RTN documents · Transferred = moved to another holder or site on completed TRF documents · <strong style={{ color: 'var(--text-2)' }}>Still Out = Assigned − Installed − Returned − Transferred</strong>: what the holder has yet to account for, a transfer being one of the ways they account for it. A date range narrows the hand-outs, not what became of them: a form issued in June stays in scope along with the installation or return booked against its stock in August.
       </div>
     </div>
   );

@@ -40,7 +40,12 @@ export class CreateTransferFormDto {
   @IsOptional() @IsString()
   fromProjectSite?: string;
 
-  @IsOptional() @IsUUID()
+  // The three person fields below take `''` as "nobody", which is what a
+  // cleared dropdown sends. Left as an empty string it fails @IsUUID and the
+  // whole save is rejected; dropped from the payload instead it never reaches
+  // Object.assign and the old person quietly survives. Mapped to null, it
+  // clears the column — @IsOptional passes null through untouched.
+  @IsOptional() @Transform(({ value }) => (value === '' ? null : value)) @IsUUID()
   issuedById?: string;
 
   @IsOptional() @IsDateString()
@@ -52,13 +57,13 @@ export class CreateTransferFormDto {
   @IsOptional() @IsString()
   toProjectSite?: string;
 
-  @IsOptional() @IsUUID()
+  @IsOptional() @Transform(({ value }) => (value === '' ? null : value)) @IsUUID()
   receivedById?: string;
 
   @IsOptional() @IsString()
   reasonForTransfer?: string;
 
-  @IsOptional() @IsUUID()
+  @IsOptional() @Transform(({ value }) => (value === '' ? null : value)) @IsUUID()
   approvedById?: string;
 
   @IsOptional() @IsString()

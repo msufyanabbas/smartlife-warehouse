@@ -58,9 +58,32 @@ export class TransferFormsService {
     // Captured before the merge — the inventory move must run exactly once, on
     // the transition into `completed`, not on every save of a completed form.
     const wasCompleted = doc.status === TransferFormStatus.COMPLETED;
+    // Captured before the merge so we can tell which of the three people named
+    // on the document actually changed.
+    const prevIssuedById = doc.issuedById;
+    const prevReceivedById = doc.receivedById;
+    const prevApprovedById = doc.approvedById;
 
     Object.assign(doc, dto);
     if (dto.items) doc.items = normalizeItems(dto.items);
+
+    // `issuedBy`/`receivedBy`/`approvedBy` are eager relations, so `doc` was
+    // loaded with the old User objects attached. Object.assign only touched the
+    // FK columns; on save TypeORM derives each FK from the still-attached
+    // relation object and silently writes the old id back — which is exactly why
+    // re-pointing a transfer at a different person never stuck. Re-point the
+    // relation at the new id (or clear it) so the FK we were asked to persist is
+    // the one that survives the save. The same fix the assignment form and the
+    // return document already carry.
+    if (doc.issuedById !== prevIssuedById) {
+      doc.issuedBy = (doc.issuedById ? { id: doc.issuedById } : null) as User;
+    }
+    if (doc.receivedById !== prevReceivedById) {
+      doc.receivedBy = (doc.receivedById ? { id: doc.receivedById } : null) as User;
+    }
+    if (doc.approvedById !== prevApprovedById) {
+      doc.approvedBy = (doc.approvedById ? { id: doc.approvedById } : null) as User;
+    }
 
     const saved = await this.formRepository.save(doc);
     if (!wasCompleted && saved.status === TransferFormStatus.COMPLETED) {

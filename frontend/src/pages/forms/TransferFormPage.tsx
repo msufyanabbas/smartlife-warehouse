@@ -325,9 +325,12 @@ function TransferEditor({ id, doc, onClose, onCreated }: {
       ...form,
       status,
       transferDate: orUndefined(form.transferDate),
-      issuedById: orUndefined(form.issuedById),
-      receivedById: orUndefined(form.receivedById),
-      approvedById: orUndefined(form.approvedById),
+      // Sent as '' rather than dropped when nobody is selected. An omitted key
+      // never reaches the server's Object.assign, so clearing a person on an
+      // existing form would leave the old one in place; the DTO maps '' to null.
+      issuedById: form.issuedById,
+      receivedById: form.receivedById,
+      approvedById: form.approvedById,
       items: stripEmptyRows(rows),
     };
 

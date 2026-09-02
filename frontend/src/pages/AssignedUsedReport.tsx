@@ -32,14 +32,17 @@ interface WorkerOption {
   id: string; firstName?: string; lastName?: string;
 }
 
+// Each of the three carries the person it concerns on its header — the one who
+// fitted it, the one who brought it back, the one who handed it on — so a
+// worker selection can narrow them the same way it narrows the hand-outs.
 interface MicLine { itemCode?: string; qtyInstalled?: number; itemId?: string }
-interface MicForm { id: string; status: string; items?: MicLine[] }
+interface MicForm { id: string; status: string; installedById?: string; items?: MicLine[] }
 
 interface RtnLine { itemCode?: string; qtyReturned?: number; itemId?: string }
-interface RtnForm { id: string; status: string; items?: RtnLine[] }
+interface RtnForm { id: string; status: string; returnedById?: string; items?: RtnLine[] }
 
 interface TrfLine { itemCode?: string; qtyToTransfer?: number; itemId?: string }
-interface TrfForm { id: string; status: string; items?: TrfLine[] }
+interface TrfForm { id: string; status: string; issuedById?: string; items?: TrfLine[] }
 
 interface InvItem {
   id: string; name: string; sku: string;
@@ -157,6 +160,12 @@ export default function AssignedUsedReport() {
 
     const forms = (formsData as AsnForm[]).filter(form => {
       if (form.status !== 'issued') return false;
+      // Narrowing to a worker has to happen here rather than on the finished
+      // rows. A row is one item summed across every form that named it, so
+      // dropping whole rows afterwards leaves the survivors still carrying
+      // everyone's quantities — pick one worker and the item reads with the
+      // total issued to the whole crew.
+      if (workerFilter && form.assignedToId !== workerFilter) return false;
       if (!from && !to) return true;
       const stamp = form.date || form.updatedAt || form.createdAt;
       if (!stamp) return true;
@@ -273,7 +282,11 @@ export default function AssignedUsedReport() {
     };
 
     // Fitted on site. Only approved MICs: a pending confirmation is a claim.
-    for (const mic of (micData as MicForm[]).filter(m => m.status === 'approved')) {
+    // Narrowed to the selected worker for the same reason as the hand-outs:
+    // an Assigned figure scoped to one person against an Installed figure
+    // scoped to the whole crew is not a row that can be read.
+    for (const mic of (micData as MicForm[]).filter(m =>
+      m.status === 'approved' && (!workerFilter || m.installedById === workerFilter))) {
       for (const line of mic.items ?? []) {
         const qty = line.qtyInstalled ?? 0;
         if (!line.itemCode?.trim() || qty <= 0) continue;
@@ -284,7 +297,8 @@ export default function AssignedUsedReport() {
 
     // Brought back. Only approved returns: a draft or a return awaiting a
     // manager is stock the worker still holds.
-    for (const rtn of (rtnData as RtnForm[]).filter(r => r.status === 'approved')) {
+    for (const rtn of (rtnData as RtnForm[]).filter(r =>
+      r.status === 'approved' && (!workerFilter || r.returnedById === workerFilter))) {
       for (const line of rtn.items ?? []) {
         const qty = line.qtyReturned ?? 0;
         if (!line.itemCode?.trim() || qty <= 0) continue;
@@ -294,7 +308,8 @@ export default function AssignedUsedReport() {
     }
 
     // Moved on. Only completed transfers: nothing has moved until then.
-    for (const trf of (transferFormsData as TrfForm[]).filter(t => t.status === 'completed')) {
+    for (const trf of (transferFormsData as TrfForm[]).filter(t =>
+      t.status === 'completed' && (!workerFilter || t.issuedById === workerFilter))) {
       for (const line of trf.items ?? []) {
         const qty = line.qtyToTransfer ?? 0;
         if (!line.itemCode?.trim() || qty <= 0) continue;
@@ -307,7 +322,7 @@ export default function AssignedUsedReport() {
       ...row,
       closing: Math.max(0, row.assigned - row.installed - row.returned),
     }));
-  }, [formsData, inventoryData, micData, rtnData, transferFormsData, dateFrom, dateTo]);
+  }, [formsData, inventoryData, micData, rtnData, transferFormsData, dateFrom, dateTo, workerFilter]);
 
   const schemeOptions = useMemo(
     () => [...new Set(allRows.map(r => r.schemeNo).filter(Boolean))].sort(),
@@ -323,7 +338,7 @@ export default function AssignedUsedReport() {
     return allRows.filter(row => {
       const haystack = [
         row.itemCode, row.itemDescription, row.serialNumber, row.schemeNo,
-        ...row.assignmentNos,
+        ...row.assignmentNos, ...row.assignedToNames,
       ].join(' ').toLowerCase();
 
       if (q && !haystack.includes(q)) return false;
@@ -331,15 +346,14 @@ export default function AssignedUsedReport() {
       if (schemeFilters.length && !schemeFilters.includes(row.schemeNo)) return false;
       if (categoryFilters.length && !categoryFilters.includes(row.category)) return false;
       if (conditionFilters.length && !conditionFilters.includes(row.condition)) return false;
-      // Matched on id rather than name: two people can share a name, and the
-      // form records the id whether or not the relation resolved.
-      if (workerFilter && !row.assignedToIds.includes(workerFilter)) return false;
+      // No worker check here — `allRows` was built from that worker's documents
+      // alone, so every row reaching this point is already theirs.
       if (installedOnly && row.installed <= 0) return false;
       if (returnedOnly && row.returned <= 0) return false;
       if (transferredOnly && row.transferred <= 0) return false;
       return true;
     });
-  }, [allRows, search, workerFilter, schemeFilters, categoryFilters, conditionFilters,
+  }, [allRows, search, schemeFilters, categoryFilters, conditionFilters,
     installedOnly, returnedOnly, transferredOnly]);
 
   /**

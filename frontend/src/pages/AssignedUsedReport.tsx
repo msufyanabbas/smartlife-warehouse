@@ -320,7 +320,7 @@ export default function AssignedUsedReport() {
 
     return [...rows.values()].map(row => ({
       ...row,
-      closing: Math.max(0, row.assigned - row.installed - row.returned),
+      closing: Math.max(0, row.assigned - row.installed - row.returned - row.transferred),
     }));
   }, [formsData, inventoryData, micData, rtnData, transferFormsData, dateFrom, dateTo, workerFilter]);
 

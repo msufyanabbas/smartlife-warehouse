@@ -1,16 +1,17 @@
 import { useMemo, type ReactNode } from 'react';
 import {
   Package, ClipboardList, AlertCircle, TrendingUp,
-  ClipboardCheck, CheckCircle, RotateCcw,
+  ClipboardCheck, CheckCircle, RotateCcw, ArrowLeftRight,
 } from 'lucide-react';
 import {
   useAssignments, usePendingTransfers, usePendingMic, usePendingRtn,
-  useGrnList, useAssignmentForms, useMicList, useRtnList,
+  useGrnList, useAssignmentForms, useMicList, useRtnList, useTransferForms,
 } from '../hooks/useApi';
 import { useAuth } from '../contexts/AuthContext';
 import { Link } from 'react-router-dom';
 import type {
   TransferRequest, Assignment, MicDocument, GrnDocument, AssignmentForm, RtnDocument,
+  TransferForm,
 } from '../types';
 import { formatDistanceToNow } from 'date-fns';
 
@@ -34,6 +35,7 @@ export default function DashboardPage() {
   const { data: assignmentFormsData = [] } = useAssignmentForms();
   const { data: micData = [] } = useMicList();
   const { data: rtnData = [] } = useRtnList();
+  const { data: transferFormsData = [] } = useTransferForms();
 
   const pendingCount = Array.isArray(pending) ? pending.length : 0;
   const pendingMicList: MicDocument[] = Array.isArray(pendingMic) ? pendingMic : [];
@@ -51,6 +53,10 @@ export default function DashboardPage() {
   const approvedRtns = useMemo(
     () => (rtnData as RtnDocument[]).filter(rtn => rtn.status === 'approved'),
     [rtnData],
+  );
+  const completedTrfs = useMemo(
+    () => (transferFormsData as TransferForm[]).filter(trf => trf.status === 'completed'),
+    [transferFormsData],
   );
 
   const docStats = useMemo(() => {
@@ -73,12 +79,23 @@ export default function DashboardPage() {
       .flatMap(mic => mic.items ?? [])
       .reduce((sum, line) => sum + (line.qtyInstalled || 0), 0);
 
+    // Stock that changed hands on a completed TRF. It sits apart from the three
+    // figures above rather than among them: a transfer creates no stock and
+    // consumes none, so it belongs to neither side of received-minus-assigned.
+    // It is here because it is the only thing that explains an Assigned figure
+    // moving between two workers with no hand-out and no return behind it.
+    const totalTransferred = completedTrfs
+      .flatMap(trf => trf.items ?? [])
+      .reduce((sum, line) => sum + (line.qtyToTransfer || 0), 0);
+
     const totalAssigned = Math.max(0, totalIssued - totalReturned);
 
     return {
       totalReceived,
       totalAssigned,
       totalInstalled,
+      totalTransferred,
+      totalTrfs: completedTrfs.length,
       // Floored at zero: only a formal RTN is netted off above, while an ad-hoc
       // return request adjusts inventory without ever being written back to the
       // form that issued it, so stock handed out and given back that way still
@@ -87,7 +104,7 @@ export default function DashboardPage() {
       totalGrns: completedGrns.length,
       totalAsns: issuedForms.length,
     };
-  }, [completedGrns, issuedForms, approvedRtns, micData]);
+  }, [completedGrns, issuedForms, approvedRtns, completedTrfs, micData]);
 
   const recentAsns = useMemo(
     () => [...issuedForms]
@@ -169,9 +186,9 @@ export default function DashboardPage() {
         <p>Here's what's happening in your warehouse today.</p>
       </div>
 
-      {/* Stats — all four derived from documents */}
+      {/* Stats — all five derived from documents */}
       {isManager && (
-        <div className="grid-4" style={{ marginBottom: 24 }}>
+        <div className="grid-5" style={{ marginBottom: 24 }}>
           {statCard(
             <Package size={20} color="var(--blue)" />,
             'Total Received', docStats.totalReceived,
@@ -195,6 +212,12 @@ export default function DashboardPage() {
             'Installed', docStats.totalInstalled,
             'Via approved MIC forms',
             'var(--purple)', 'var(--purple-dim)',
+          )}
+          {statCard(
+            <ArrowLeftRight size={20} color="var(--blue)" />,
+            'Transferred', docStats.totalTransferred,
+            `${docStats.totalTrfs} transfer form${docStats.totalTrfs === 1 ? '' : 's'}`,
+            'var(--blue)', 'var(--blue-dim)',
           )}
         </div>
       )}

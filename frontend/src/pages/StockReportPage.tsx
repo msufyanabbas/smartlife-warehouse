@@ -6,6 +6,7 @@ import { BarChart2, ClipboardCheck, Download, FileDown, Search, Filter } from 'l
 import { format, startOfMonth, endOfMonth, subMonths } from 'date-fns';
 import {
   useInventory, useItemUsage, useGrnList, useAssignmentForms, useRtnList,
+  useTransferForms,
 } from '../hooks/useApi';
 import MultiSelect from '../components/MultiSelect';
 import SerialNumbers from '../components/SerialNumbers';
@@ -73,6 +74,16 @@ interface RtnDocumentRow {
   items?: RtnLine[];
 }
 
+interface TrfLine {
+  itemCode?: string; qtyToTransfer?: number; itemId?: string;
+}
+
+interface TrfDocumentRow {
+  id: string; transferNo: string; status: string;
+  transferDate?: string; updatedAt?: string; createdAt?: string;
+  items?: TrfLine[];
+}
+
 interface StockRow {
   itemId: string;
   name: string;
@@ -89,6 +100,14 @@ interface StockRow {
   opening: number;
   received: number;
   assigned: number;
+  /**
+   * How much of this row a completed TRF moved inside the period. Reported
+   * alongside the balance rather than inside it: a transfer changes who holds
+   * the stock, never how much of it there is, so it neither adds to Received
+   * nor comes off Closing. It is the audit trail for an Assigned figure that
+   * moved between two periods without a hand-out or a return to explain it.
+   */
+  transferred: number;
   issued: number;
   closing: number;
 }
@@ -186,6 +205,7 @@ function StockMovementReport() {
   const { data: grnData = [] } = useGrnList();
   const { data: assignmentFormsData = [] } = useAssignmentForms();
   const { data: rtnData = [] } = useRtnList();
+  const { data: transferFormsData = [] } = useTransferForms();
 
   const today = new Date().toISOString().split('T')[0];
   const [dateFrom, setDateFrom] = useState(format(startOfMonth(new Date()), 'yyyy-MM-dd'));
@@ -195,12 +215,14 @@ function StockMovementReport() {
   const [categoryFilters, setCategoryFilters] = useState<string[]>([]);
   const [conditionFilters, setConditionFilters] = useState<string[]>([]);
   const [rtnReasonFilters, setRtnReasonFilters] = useState<string[]>([]);
+  const [transferredOnly, setTransferredOnly] = useState(false);
 
   const list = items as InventoryItem[];
   const usage = usageData as UsageRecord[];
   const grns = grnData as GrnDocument[];
   const assignmentForms = assignmentFormsData as AssignmentFormDocument[];
   const rtns = rtnData as RtnDocumentRow[];
+  const trfs = transferFormsData as TrfDocumentRow[];
 
   const schemeOptions = useMemo(() => [...new Set(list.map(i => i.schemeNo).filter(Boolean))].sort() as string[], [list]);
   const categoryOptions = useMemo(() => [...new Set(list.map(i => i.category).filter(Boolean))].sort() as string[], [list]);
@@ -378,6 +400,47 @@ function StockMovementReport() {
     return { byItemId, bySkuUnlinked };
   }, [rtns]);
 
+  /**
+   * What completed transfer forms moved off each inventory row, dated so a
+   * period can be cut out of it.
+   *
+   * A transfer is the one movement that leaves the totals alone: `completeTransfer()`
+   * takes the quantity off the issuer and hands it to the receiver — or books it
+   * back onto the shelf when the receiver is not a worker — so the row's own
+   * total never changes and nothing about it survives to be read back later. The
+   * TRF documents are the only record that the stock moved at all, which is what
+   * makes them the only way to explain an Assigned figure that shifted between
+   * two periods with no hand-out and no return behind it.
+   *
+   * Keyed the two ways every other document map here is keyed: a line normally
+   * names its inventory row outright (`findLineItem()` prefers `itemId`), and one
+   * carrying only a SKU falls into the SKU map so it is never counted twice.
+   * Drafts and approved-but-not-yet-completed forms are excluded — nothing has
+   * moved until the form is completed.
+   */
+  const trfTransferred = useMemo(() => {
+    const byItemId = new Map<string, { date: Date | null; qty: number }[]>();
+    const bySkuUnlinked = new Map<string, { date: Date | null; qty: number }[]>();
+    for (const trf of trfs) {
+      if (trf.status !== 'completed') continue;
+      // `transferDate` is the date the warehouse put on the form; the timestamps
+      // are the fallback for a form that never had one filled in.
+      const stamp = trf.transferDate || trf.updatedAt || trf.createdAt;
+      const date = stamp ? parseDate(stamp) : null;
+      for (const line of trf.items ?? []) {
+        const qty = line.qtyToTransfer ?? 0;
+        if (qty <= 0) continue;
+        if (line.itemId) {
+          byItemId.set(line.itemId, [...(byItemId.get(line.itemId) ?? []), { date, qty }]);
+        } else if (line.itemCode?.trim()) {
+          const sku = matchKey(line.itemCode);
+          bySkuUnlinked.set(sku, [...(bySkuUnlinked.get(sku) ?? []), { date, qty }]);
+        }
+      }
+    }
+    return { byItemId, bySkuUnlinked };
+  }, [trfs]);
+
   /** Consumption logged against each row, kept with its date so a period can be cut out of it. */
   const usageByItem = useMemo(() => {
     const byItem = new Map<string, { date: Date; qty: number }[]>();
@@ -422,6 +485,30 @@ function StockMovementReport() {
         ?? (ambiguousSkus.has(sku) ? undefined : rtnDetail.bySkuUnlinked.get(sku));
     };
 
+    /**
+     * What completed TRFs moved off this row inside the period.
+     *
+     * Both key paths are added rather than fallen through, as on the return
+     * side: a linked and an unlinked line are different lines on different
+     * forms, and taking only the first would under-report the movement. An
+     * unlinked line on a duplicated SKU is dropped — there is no telling which
+     * of those rows it came off, and crediting every one of them would report
+     * the same transfer several times over.
+     *
+     * A form with no date at all is counted in every period rather than
+     * vanishing from all of them.
+     */
+    const transferredInPeriod = (item: InventoryItem) => {
+      const sku = matchKey(item.sku);
+      const moves = [
+        ...(trfTransferred.byItemId.get(item.id) ?? []),
+        ...(ambiguousSkus.has(sku) ? [] : (trfTransferred.bySkuUnlinked.get(sku) ?? [])),
+      ];
+      return moves
+        .filter(m => !m.date || (m.date >= from && m.date <= to))
+        .reduce((sum, m) => sum + m.qty, 0);
+    };
+
     return list
       .filter(item => {
         // Every number below is built from GRN receipts, so a row no GRN ever
@@ -438,11 +525,15 @@ function StockMovementReport() {
         // row with no approved return drops out rather than matching on blank.
         const matchReason = !rtnReasonFilters.length
           || rtnReasonFilters.includes(returnVerdict(item)?.reason || '');
-        return matchSearch && matchScheme && matchCat && matchCondition && matchReason;
+        // "Only what moved" — a row no completed TRF touched this period drops out.
+        const matchTransferred = !transferredOnly || transferredInPeriod(item) > 0;
+        return matchSearch && matchScheme && matchCat && matchCondition
+          && matchReason && matchTransferred;
       })
       .map(item => {
         const receipts = receiptsByItem.get(item.id) ?? [];
         const verdict = returnVerdict(item);
+        const transferred = transferredInPeriod(item);
 
         // Opening — everything GRNs receipted onto this row before the period
         // opened. Read off the receipts themselves rather than reasoning
@@ -505,23 +596,31 @@ function StockMovementReport() {
           opening,
           received,
           assigned,
+          // Deliberately absent from `closing` above: a transfer moves stock
+          // between holders without creating or consuming any, so netting it
+          // into the balance would report the same units leaving twice.
+          transferred,
           issued: issuedInPeriod,
           closing,
         };
       });
-  }, [list, usageByItem, receiptsByItem, asnIssued, rtnReturned, rtnDetail, ambiguousSkus, dateFrom, dateTo, search, schemeFilters, categoryFilters, conditionFilters, rtnReasonFilters]);
+  }, [list, usageByItem, receiptsByItem, asnIssued, rtnReturned, rtnDetail, trfTransferred, ambiguousSkus, dateFrom, dateTo, search, schemeFilters, categoryFilters, conditionFilters, rtnReasonFilters, transferredOnly]);
 
   // Totals
   const totals = useMemo(() => ({
     opening: reportRows.reduce((s, r) => s + r.opening, 0),
     received: reportRows.reduce((s, r) => s + r.received, 0),
     assigned: reportRows.reduce((s, r) => s + r.assigned, 0),
+    transferred: reportRows.reduce((s, r) => s + r.transferred, 0),
     issued: reportRows.reduce((s, r) => s + r.issued, 0),
     closing: reportRows.reduce((s, r) => s + r.closing, 0),
   }), [reportRows]);
 
   /** Whether any approved return has been documented, which is what makes the Assigned column a net figure. */
   const hasRtnActivity = rtnReturned.byItemId.size > 0 || rtnReturned.bySkuUnlinked.size > 0;
+
+  /** Whether any completed transfer landed in the period on show, which is what makes the Transferred column worth explaining. */
+  const hasTrfActivity = totals.transferred > 0;
 
   const setQuickRange = (range: typeof QUICK_RANGES[0]) => {
     const { from, to } = range.getValue();
@@ -543,6 +642,7 @@ function StockMovementReport() {
       'Opening': r.opening,
       'Received': r.received,
       'Assigned': r.assigned,
+      'Transferred': r.transferred,
       'Issued': r.issued,
       'Closing': r.closing,
     }));
@@ -561,6 +661,7 @@ function StockMovementReport() {
       'Opening': totals.opening,
       'Received': totals.received,
       'Assigned': totals.assigned,
+      'Transferred': totals.transferred,
       'Issued': totals.issued,
       'Closing': totals.closing,
     });
@@ -723,7 +824,7 @@ function StockMovementReport() {
     // ── Main table ──
     autoTable(doc, {
       startY: tableLabelY + 3,
-      head: [['#', 'Product', 'SKU', 'Scheme', 'Condition', 'Opening', 'Received', 'Assigned', 'Issued', 'Closing']],
+      head: [['#', 'Product', 'SKU', 'Scheme', 'Condition', 'Opening', 'Received', 'Assigned', 'Transferred', 'Issued', 'Closing']],
       body: [
         ...reportRows.map((row, idx) => [
           idx + 1,
@@ -734,12 +835,17 @@ function StockMovementReport() {
           row.opening || '—',
           row.received > 0 ? `+${row.received}` : '—',
           row.assigned > 0 ? String(row.assigned) : '—',
+          // No arrow glyph here, unlike on screen: jsPDF's built-in helvetica is
+          // WinAnsi, which has no U+2194, and an unmapped code point prints as
+          // a stray character rather than as nothing.
+          row.transferred > 0 ? String(row.transferred) : '—',
           row.issued > 0 ? `-${row.issued}` : '—',
           row.closing,
         ]),
         // Totals row
         ['', `TOTAL (${reportRows.length} items)`, '', '', '',
           totals.opening, `+${totals.received}`, totals.assigned,
+          totals.transferred > 0 ? String(totals.transferred) : '0',
           totals.issued > 0 ? `-${totals.issued}` : '0', totals.closing],
       ],
       styles: { fontSize: 8, cellPadding: 2.5 },
@@ -751,19 +857,24 @@ function StockMovementReport() {
         halign: 'center',
       },
       // Widths sum to contentW (269mm), so the table spans the same band as the
-      // title bar and the stats row: 8+59+32+30+20+24+24+24+24+24. Condition was
-      // paid for out of the three text columns, which had the slack to give.
+      // title bar and the stats row: 8+55+28+26+20+22*6. Transferred was paid
+      // for out of the three text columns and a millimetre off each figure —
+      // 'Transferred' is the widest heading on the row, so the numeric columns
+      // could not simply be divided one further.
       columnStyles: {
         0: { cellWidth: 8, halign: 'center' },
-        1: { cellWidth: 59 },
-        2: { cellWidth: 32, font: 'courier', fontSize: 7 },
-        3: { cellWidth: 30 },
+        1: { cellWidth: 55 },
+        2: { cellWidth: 28, font: 'courier', fontSize: 7 },
+        3: { cellWidth: 26 },
         4: { cellWidth: 20, halign: 'center' },
-        5: { cellWidth: 24, halign: 'center' },
-        6: { cellWidth: 24, halign: 'center', textColor: [0, 150, 80] },
-        7: { cellWidth: 24, halign: 'center', textColor: [107, 47, 217] },
-        8: { cellWidth: 24, halign: 'center', textColor: [200, 100, 0] },
-        9: { cellWidth: 24, halign: 'center', fontStyle: 'bold' },
+        5: { cellWidth: 22, halign: 'center' },
+        6: { cellWidth: 22, halign: 'center', textColor: [0, 150, 80] },
+        7: { cellWidth: 22, halign: 'center', textColor: [107, 47, 217] },
+        // Blue, not the purple next to it: a transfer is a different event from
+        // a hand-out and the two columns sit side by side.
+        8: { cellWidth: 22, halign: 'center', textColor: [0, 136, 204] },
+        9: { cellWidth: 22, halign: 'center', textColor: [200, 100, 0] },
+        10: { cellWidth: 22, halign: 'center', fontStyle: 'bold' },
       },
       alternateRowStyles: { fillColor: [248, 248, 252] },
       didParseCell: (data) => {
@@ -817,11 +928,19 @@ function StockMovementReport() {
       notes.push('Assigned = total issued via ASN minus returned via RTN documents.');
     }
 
+    // Same reasoning: only worth saying on a report that actually has transfers
+    // on it, and worth saying there because a column that never feeds Closing
+    // otherwise reads as an arithmetic error.
+    if (hasTrfActivity) {
+      notes.push('Transferred = moved between holders on completed TRF documents in this period. Not added or subtracted: a transfer changes who holds the stock, not how much there is.');
+    }
+
     const filterParts = [];
     if (schemeFilters.length > 0) filterParts.push(`Schemes: ${schemeFilters.join(', ')}`);
     if (categoryFilters.length > 0) filterParts.push(`Categories: ${categoryFilters.join(', ')}`);
     if (conditionFilters.length > 0) filterParts.push(`Condition: ${conditionFilters.map(titleCase).join(', ')}`);
     if (rtnReasonFilters.length > 0) filterParts.push(`Return reason: ${rtnReasonFilters.join(', ')}`);
+    if (transferredOnly) filterParts.push('Transferred items only');
     if (search) filterParts.push(`Search: "${search}"`);
     if (dateFrom || dateTo) filterParts.push(`Date: ${dateFrom || 'All'} → ${dateTo || 'Today'}`);
     if (filterParts.length > 0) notes.push(`Filters applied: ${filterParts.join(' · ')}`);
@@ -840,13 +959,13 @@ function StockMovementReport() {
 
   const clearFilters = () => {
     setSearch(''); setSchemeFilters([]); setCategoryFilters([]);
-    setConditionFilters([]); setRtnReasonFilters([]);
+    setConditionFilters([]); setRtnReasonFilters([]); setTransferredOnly(false);
     // Reset dates to this month default, not empty (empty breaks date formatting)
     setDateFrom(format(startOfMonth(new Date()), 'yyyy-MM-dd'));
     setDateTo(today);
   };
   const hasFilters = !!search || schemeFilters.length > 0 || categoryFilters.length > 0
-    || conditionFilters.length > 0 || rtnReasonFilters.length > 0;
+    || conditionFilters.length > 0 || rtnReasonFilters.length > 0 || transferredOnly;
 
   /** One filter chip. Active paints the swatch solid; idle keeps it as the outline. */
   const filterChip = (label: string, color: string, active: boolean, onToggle: () => void) => (
@@ -957,6 +1076,19 @@ function StockMovementReport() {
           ))}
         </div>
 
+        {/* A row-level toggle rather than a chip row: there is only one thing to
+            ask of a transfer here — did this row move at all this period. */}
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, cursor: 'pointer', width: 'fit-content' }}>
+          <input
+            type="checkbox"
+            checked={transferredOnly}
+            onChange={e => setTransferredOnly(e.target.checked)}
+          />
+          <span style={{ fontSize: 13, color: 'var(--text-2)' }}>
+            Show transferred items only
+          </span>
+        </label>
+
         {hasFilters && (
           <div style={{ marginTop: 10, fontSize: 12, color: 'var(--text-3)' }}>
             Showing <strong style={{ color: 'var(--text)' }}>{reportRows.length}</strong> of {list.length} items
@@ -964,6 +1096,7 @@ function StockMovementReport() {
             {categoryFilters.length > 0 && ` · Categories: ${categoryFilters.join(', ')}`}
             {conditionFilters.length > 0 && ` · Condition: ${conditionFilters.map(titleCase).join(', ')}`}
             {rtnReasonFilters.length > 0 && ` · Returned for: ${rtnReasonFilters.join(', ')}`}
+            {transferredOnly && ' · Transferred this period only'}
           </div>
         )}
       </div>
@@ -973,6 +1106,7 @@ function StockMovementReport() {
         {statCard('Opening Stock', totals.opening, 'var(--text)', 'var(--bg-2)')}
         {statCard('Received', totals.received, 'var(--green)', 'var(--green-dim)')}
         {statCard('Assigned', totals.assigned, 'var(--purple)', 'var(--purple-dim)')}
+        {statCard('Transferred', totals.transferred, 'var(--blue)', 'var(--blue-dim)')}
         {statCard('Issued / Used', totals.issued, 'var(--yellow)', 'var(--yellow-dim)')}
         {statCard('Closing Stock', totals.closing, 'var(--accent)', 'var(--accent-dim)')}
       </div>
@@ -999,6 +1133,7 @@ function StockMovementReport() {
                 <th style={{ textAlign: 'center', background: 'var(--bg-3)' }}>Opening</th>
                 <th style={{ textAlign: 'center', color: 'var(--green)' }}>Received</th>
                 <th style={{ textAlign: 'center', color: 'var(--purple)' }}>Assigned</th>
+                <th style={{ textAlign: 'center', color: 'var(--blue)' }}>Transferred</th>
                 <th style={{ textAlign: 'center', color: 'var(--yellow)' }}>Issued</th>
                 <th style={{ textAlign: 'center', color: 'var(--accent)' }}>Closing</th>
               </tr>
@@ -1054,6 +1189,9 @@ function StockMovementReport() {
                     <td style={{ textAlign: 'center', fontWeight: 700, color: row.assigned !== 0 ? 'var(--purple)' : 'var(--text-3)' }}>
                       {row.assigned !== 0 ? row.assigned : '—'}
                     </td>
+                    <td style={{ textAlign: 'center', fontWeight: row.transferred > 0 ? 700 : 400, color: row.transferred > 0 ? 'var(--blue)' : 'var(--text-3)' }}>
+                      {row.transferred > 0 ? `↔ ${row.transferred}` : '—'}
+                    </td>
                     <td style={{ textAlign: 'center', fontWeight: 700, color: row.issued > 0 ? 'var(--yellow)' : 'var(--text-3)' }}>
                       {row.issued > 0 ? `-${row.issued}` : '—'}
                     </td>
@@ -1073,6 +1211,9 @@ function StockMovementReport() {
                 <td style={{ textAlign: 'center', padding: '10px 16px' }}>{totals.opening}</td>
                 <td style={{ textAlign: 'center', padding: '10px 16px', color: 'var(--green)' }}>+{totals.received}</td>
                 <td style={{ textAlign: 'center', padding: '10px 16px', color: 'var(--purple)' }}>{totals.assigned}</td>
+                <td style={{ textAlign: 'center', padding: '10px 16px', color: 'var(--blue)' }}>
+                  {totals.transferred > 0 ? `↔ ${totals.transferred}` : '—'}
+                </td>
                 <td style={{ textAlign: 'center', padding: '10px 16px', color: 'var(--yellow)' }}>-{totals.issued}</td>
                 <td style={{ textAlign: 'center', padding: '10px 16px', color: 'var(--accent)', fontSize: 16 }}>{totals.closing}</td>
               </tr>
@@ -1084,7 +1225,7 @@ function StockMovementReport() {
       {/* Legend */}
       <div style={{ marginTop: 16, padding: '12px 16px', background: 'var(--bg-2)', borderRadius: 'var(--radius)', border: '1px solid var(--border)', fontSize: 12, color: 'var(--text-3)' }}>
         <strong style={{ color: 'var(--text-2)' }}>How it works:</strong>
-        {' '}Every figure is derived from documents, not from live inventory balances. Opening = received via GRN before this period · Received = received via GRN in this period · Assigned = total handed out on Assignment Forms minus what approved Return Documents (RTN) brought back, all time · Issued = consumed via the usage log in this period · <strong style={{ color: 'var(--text-2)' }}>Closing = Opening + Received − Assigned</strong>. Issued is shown but not subtracted — stock has to be assigned before it can be consumed, so it already left the warehouse under Assigned. Only items with GRN history appear, and Closing will not always match the Inventory page. <strong style={{ color: 'var(--text-2)' }}>Condition</strong> is the warehouse's own grading of the row; <strong style={{ color: 'var(--text-2)' }}>Returned As</strong> is what the most recent approved RTN said when the stock came back — a row never returned shows neither.
+        {' '}Every figure is derived from documents, not from live inventory balances. Opening = received via GRN before this period · Received = received via GRN in this period · Assigned = total handed out on Assignment Forms minus what approved Return Documents (RTN) brought back, all time · Transferred = moved between holders or sites on completed Transfer Forms (TRF) in this period · Issued = consumed via the usage log in this period · <strong style={{ color: 'var(--text-2)' }}>Closing = Opening + Received − Assigned</strong>. Issued is shown but not subtracted — stock has to be assigned before it can be consumed, so it already left the warehouse under Assigned. <strong style={{ color: 'var(--text-2)' }}>Transferred</strong> is not part of the balance either: a transfer changes who holds the stock, never how much of it exists, so it is here to explain an Assigned figure that moved between periods with no hand-out or return behind it. Only items with GRN history appear, and Closing will not always match the Inventory page. <strong style={{ color: 'var(--text-2)' }}>Condition</strong> is the warehouse's own grading of the row; <strong style={{ color: 'var(--text-2)' }}>Returned As</strong> is what the most recent approved RTN said when the stock came back — a row never returned shows neither.
       </div>
     </div>
   );

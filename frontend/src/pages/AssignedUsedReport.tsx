@@ -313,7 +313,6 @@ export default function AssignedUsedReport() {
       'Condition': titleCase(row.condition),
       'Scheme': row.schemeNo,
       'Serial No.': row.serialNumber,
-      'In Stock': row.opening,
       'Assigned': row.assigned,
       'Installed (MIC)': row.installed,
       'Returned (RTN)': row.returned,

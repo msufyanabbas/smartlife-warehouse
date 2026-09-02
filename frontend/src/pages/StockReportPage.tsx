@@ -9,6 +9,7 @@ import {
   useTransferForms,
 } from '../hooks/useApi';
 import MultiSelect from '../components/MultiSelect';
+import { drawReportChrome, drawStatBoxes, drawReportFooter } from '../components/documents/reportPdf';
 import SerialNumbers from '../components/SerialNumbers';
 import AssignedUsedReport from './AssignedUsedReport';
 import InstallationsReport from './InstallationsReport';
@@ -101,11 +102,14 @@ interface StockRow {
   received: number;
   assigned: number;
   /**
-   * How much of this row a completed TRF moved inside the period. Reported
-   * alongside the balance rather than inside it: a transfer changes who holds
-   * the stock, never how much of it there is, so it neither adds to Received
-   * nor comes off Closing. It is the audit trail for an Assigned figure that
-   * moved between two periods without a hand-out or a return to explain it.
+   * How much of this row a completed TRF moved inside the period.
+   *
+   * Carried on the row but not shown on this tab: a transfer changes who holds
+   * the stock, never how much of it there is, so it belongs to neither side of
+   * the opening / received / assigned / closing balance this table reports.
+   * Where the movement is actually read is the Issued Items tab, which asks
+   * what became of stock after it was handed out — the question a transfer
+   * answers.
    */
   transferred: number;
   issued: number;
@@ -215,7 +219,6 @@ function StockMovementReport() {
   const [categoryFilters, setCategoryFilters] = useState<string[]>([]);
   const [conditionFilters, setConditionFilters] = useState<string[]>([]);
   const [rtnReasonFilters, setRtnReasonFilters] = useState<string[]>([]);
-  const [transferredOnly, setTransferredOnly] = useState(false);
 
   const list = items as InventoryItem[];
   const usage = usageData as UsageRecord[];
@@ -525,10 +528,7 @@ function StockMovementReport() {
         // row with no approved return drops out rather than matching on blank.
         const matchReason = !rtnReasonFilters.length
           || rtnReasonFilters.includes(returnVerdict(item)?.reason || '');
-        // "Only what moved" — a row no completed TRF touched this period drops out.
-        const matchTransferred = !transferredOnly || transferredInPeriod(item) > 0;
-        return matchSearch && matchScheme && matchCat && matchCondition
-          && matchReason && matchTransferred;
+        return matchSearch && matchScheme && matchCat && matchCondition && matchReason;
       })
       .map(item => {
         const receipts = receiptsByItem.get(item.id) ?? [];
@@ -604,23 +604,19 @@ function StockMovementReport() {
           closing,
         };
       });
-  }, [list, usageByItem, receiptsByItem, asnIssued, rtnReturned, rtnDetail, trfTransferred, ambiguousSkus, dateFrom, dateTo, search, schemeFilters, categoryFilters, conditionFilters, rtnReasonFilters, transferredOnly]);
+  }, [list, usageByItem, receiptsByItem, asnIssued, rtnReturned, rtnDetail, trfTransferred, ambiguousSkus, dateFrom, dateTo, search, schemeFilters, categoryFilters, conditionFilters, rtnReasonFilters]);
 
   // Totals
   const totals = useMemo(() => ({
     opening: reportRows.reduce((s, r) => s + r.opening, 0),
     received: reportRows.reduce((s, r) => s + r.received, 0),
     assigned: reportRows.reduce((s, r) => s + r.assigned, 0),
-    transferred: reportRows.reduce((s, r) => s + r.transferred, 0),
     issued: reportRows.reduce((s, r) => s + r.issued, 0),
     closing: reportRows.reduce((s, r) => s + r.closing, 0),
   }), [reportRows]);
 
   /** Whether any approved return has been documented, which is what makes the Assigned column a net figure. */
   const hasRtnActivity = rtnReturned.byItemId.size > 0 || rtnReturned.bySkuUnlinked.size > 0;
-
-  /** Whether any completed transfer landed in the period on show, which is what makes the Transferred column worth explaining. */
-  const hasTrfActivity = totals.transferred > 0;
 
   const setQuickRange = (range: typeof QUICK_RANGES[0]) => {
     const { from, to } = range.getValue();
@@ -642,7 +638,6 @@ function StockMovementReport() {
       'Opening': r.opening,
       'Received': r.received,
       'Assigned': r.assigned,
-      'Transferred': r.transferred,
       'Issued': r.issued,
       'Closing': r.closing,
     }));
@@ -661,7 +656,6 @@ function StockMovementReport() {
       'Opening': totals.opening,
       'Received': totals.received,
       'Assigned': totals.assigned,
-      'Transferred': totals.transferred,
       'Issued': totals.issued,
       'Closing': totals.closing,
     });
@@ -687,135 +681,26 @@ function StockMovementReport() {
    */
   const exportPdf = async () => {
     const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
-    const pageW = doc.internal.pageSize.width;        // 297mm
-    const pageH = doc.internal.pageSize.height;       // 210mm
-    const marginL = 14;                               // left margin
-    const marginR = 14;                               // right margin
-    const contentW = pageW - marginL - marginR;       // usable width = 269mm
-    // Every band on the page — header box, title bar, strip, stats, table —
-    // is laid out from marginL and contentW, so they share both edges exactly.
-
-    // ── Load logo ──
-    let logoAdded = false;
-    try {
-      const response = await fetch('/smartlife.png');
-      const blob = await response.blob();
-      const reader = new FileReader();
-      const logoData = await new Promise<string>((resolve, reject) => {
-        reader.onload = () => resolve(reader.result as string);
-        reader.onerror = () => reject(reader.error);
-        reader.readAsDataURL(blob);
-      });
-      // 34.4 × 13 keeps the asset's own 952×360 proportions — the print header
-      // sets a height and lets the width follow, and a stretched logo is the one
-      // thing that reads as "not the same document".
-      doc.addImage(logoData, 'PNG', marginL, 10, 34.4, 13);
-      logoAdded = true;
-    } catch { /* skip logo if fails */ }
-
-    // ── Company name ──
-    const textX = marginL;
-    const nameY = logoAdded ? 27 : 14;
-    doc.setFontSize(9);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(26, 26, 62);
-    doc.text('SMART LIFE CONTRACTING COMPANY', textX, nameY);
-    doc.setFontSize(7);
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(156, 163, 175);
-    doc.text('WAREHOUSE & INVENTORY MANAGEMENT', textX, nameY + 4);
-
-    // ── Report period box (top right) ──
-    // From and to sit on their own lines: a single "01 Aug 2026 → 04 Aug 2026"
-    // run is wider than the box at any weight worth reading.
-    const boxW = 75, boxH = 26, boxX = pageW - marginR - boxW, boxY = 8;
-    doc.setFillColor(240, 240, 248);
-    doc.setDrawColor(224, 224, 239);
-    doc.roundedRect(boxX, boxY, boxW, boxH, 2, 2, 'FD');
 
     const fromText = dateFrom ? format(new Date(dateFrom), 'dd MMM yyyy') : 'All time';
     const toText = dateTo ? format(new Date(dateTo), 'dd MMM yyyy') : 'Today';
 
-    // Line 1: FROM date
-    doc.setFontSize(8);
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(120, 120, 120);
-    doc.text('FROM', boxX + boxW - 4, boxY + 6, { align: 'right' });
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(26, 26, 62);
-    doc.text(fromText, boxX + boxW - 4, boxY + 11, { align: 'right' });
-
-    // Line 2: TO date
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(120, 120, 120);
-    doc.text('TO', boxX + boxW - 4, boxY + 16, { align: 'right' });
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(26, 26, 62);
-    doc.text(toText, boxX + boxW - 4, boxY + 21, { align: 'right' });
-
-    // ── Generated stamp, below the box ──
-    doc.setFontSize(7);
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(156, 163, 175);
-    doc.text(
-      `Generated: ${format(new Date(), 'dd MMM yyyy HH:mm')}`,
-      pageW - marginR,
-      boxY + boxH + 5,
-      { align: 'right' },
-    );
-
-    // ── Title bar ──
-    // Pushed down to clear the taller box (ends at 34) and the generated stamp
-    // below it (baseline 39); everything under the bar is measured off titleY.
-    const titleY = 43;
-    doc.setFillColor(26, 26, 62);
-    doc.rect(marginL, titleY, contentW, 9, 'F');
-    doc.setFontSize(12);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(255, 255, 255);
-    doc.text('STOCK MOVEMENT REPORT', marginL + contentW / 2, titleY + 6.2, { align: 'center' });
-
-    // ── Two-color accent strip ──
-    const stripY = titleY + 9;
-    const stripW = contentW / 2;
-    doc.setFillColor(107, 47, 217);  // Purple
-    doc.rect(marginL, stripY, stripW, 2.5, 'F');
-    doc.setFillColor(0, 194, 255);   // Cyan
-    doc.rect(marginL + stripW, stripY, stripW, 2.5, 'F');
+    const chrome = await drawReportChrome(doc, {
+      title: 'STOCK MOVEMENT REPORT',
+      meta: [{ label: 'FROM', value: fromText }, { label: 'TO', value: toText }],
+    });
+    const { marginL, marginR } = chrome;
 
     // ── Summary stat boxes ──
-    const statsY = stripY + 5;
-    const statsH = 14;
-    const statW = contentW / 4;  // exactly 67.25mm each
-    const stats = [
-      { label: 'OPENING STOCK', value: totals.opening.toLocaleString(), color: [26, 26, 62] as [number, number, number] },
-      { label: 'RECEIVED', value: `+${totals.received.toLocaleString()}`, color: [0, 150, 80] as [number, number, number] },
-      { label: 'ASSIGNED', value: totals.assigned.toLocaleString(), color: [107, 47, 217] as [number, number, number] },
-      { label: 'CLOSING STOCK', value: totals.closing.toLocaleString(), color: [0, 136, 204] as [number, number, number] },
-    ];
-    // One rectangle across the full content width, then dividers — four abutting
-    // rects double-strike their shared edges, which is what reads as a gap.
-    doc.setFillColor(255, 255, 255);
-    doc.setDrawColor(229, 231, 235);
-    doc.rect(marginL, statsY, contentW, statsH, 'FD');
-    for (let i = 1; i < 4; i++) {
-      doc.line(marginL + i * statW, statsY, marginL + i * statW, statsY + statsH);
-    }
-
-    stats.forEach((stat, i) => {
-      const sx = marginL + i * statW;
-      doc.setFontSize(6.5);
-      doc.setFont('helvetica', 'normal');
-      doc.setTextColor(156, 163, 175);
-      doc.text(stat.label, sx + statW / 2, statsY + 4.5, { align: 'center' });
-      doc.setFontSize(14);
-      doc.setFont('helvetica', 'bold');
-      doc.setTextColor(...stat.color);
-      doc.text(stat.value, sx + statW / 2, statsY + 11, { align: 'center' });
-    });
+    const statsEndY = drawStatBoxes(doc, chrome, chrome.contentY + 2.5, [
+      { label: 'OPENING STOCK', value: totals.opening.toLocaleString(), color: [26, 26, 62] },
+      { label: 'RECEIVED', value: `+${totals.received.toLocaleString()}`, color: [0, 150, 80] },
+      { label: 'ASSIGNED', value: totals.assigned.toLocaleString(), color: [107, 47, 217] },
+      { label: 'CLOSING STOCK', value: totals.closing.toLocaleString(), color: [0, 136, 204] },
+    ]);
 
     // ── Table label ──
-    const tableLabelY = statsY + statsH + 5;
+    const tableLabelY = statsEndY + 5;
     doc.setFontSize(8);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(26, 26, 62);
@@ -824,7 +709,7 @@ function StockMovementReport() {
     // ── Main table ──
     autoTable(doc, {
       startY: tableLabelY + 3,
-      head: [['#', 'Product', 'SKU', 'Scheme', 'Condition', 'Opening', 'Received', 'Assigned', 'Transferred', 'Issued', 'Closing']],
+      head: [['#', 'Product', 'SKU', 'Scheme', 'Condition', 'Opening', 'Received', 'Assigned', 'Issued', 'Closing']],
       body: [
         ...reportRows.map((row, idx) => [
           idx + 1,
@@ -835,17 +720,12 @@ function StockMovementReport() {
           row.opening || '—',
           row.received > 0 ? `+${row.received}` : '—',
           row.assigned > 0 ? String(row.assigned) : '—',
-          // No arrow glyph here, unlike on screen: jsPDF's built-in helvetica is
-          // WinAnsi, which has no U+2194, and an unmapped code point prints as
-          // a stray character rather than as nothing.
-          row.transferred > 0 ? String(row.transferred) : '—',
           row.issued > 0 ? `-${row.issued}` : '—',
           row.closing,
         ]),
         // Totals row
         ['', `TOTAL (${reportRows.length} items)`, '', '', '',
           totals.opening, `+${totals.received}`, totals.assigned,
-          totals.transferred > 0 ? String(totals.transferred) : '0',
           totals.issued > 0 ? `-${totals.issued}` : '0', totals.closing],
       ],
       styles: { fontSize: 8, cellPadding: 2.5 },
@@ -857,24 +737,19 @@ function StockMovementReport() {
         halign: 'center',
       },
       // Widths sum to contentW (269mm), so the table spans the same band as the
-      // title bar and the stats row: 8+55+28+26+20+22*6. Transferred was paid
-      // for out of the three text columns and a millimetre off each figure —
-      // 'Transferred' is the widest heading on the row, so the numeric columns
-      // could not simply be divided one further.
+      // title bar and the stats row: 8+59+32+30+20+24+24+24+24+24. Condition was
+      // paid for out of the three text columns, which had the slack to give.
       columnStyles: {
         0: { cellWidth: 8, halign: 'center' },
-        1: { cellWidth: 55 },
-        2: { cellWidth: 28, font: 'courier', fontSize: 7 },
-        3: { cellWidth: 26 },
+        1: { cellWidth: 59 },
+        2: { cellWidth: 32, font: 'courier', fontSize: 7 },
+        3: { cellWidth: 30 },
         4: { cellWidth: 20, halign: 'center' },
-        5: { cellWidth: 22, halign: 'center' },
-        6: { cellWidth: 22, halign: 'center', textColor: [0, 150, 80] },
-        7: { cellWidth: 22, halign: 'center', textColor: [107, 47, 217] },
-        // Blue, not the purple next to it: a transfer is a different event from
-        // a hand-out and the two columns sit side by side.
-        8: { cellWidth: 22, halign: 'center', textColor: [0, 136, 204] },
-        9: { cellWidth: 22, halign: 'center', textColor: [200, 100, 0] },
-        10: { cellWidth: 22, halign: 'center', fontStyle: 'bold' },
+        5: { cellWidth: 24, halign: 'center' },
+        6: { cellWidth: 24, halign: 'center', textColor: [0, 150, 80] },
+        7: { cellWidth: 24, halign: 'center', textColor: [107, 47, 217] },
+        8: { cellWidth: 24, halign: 'center', textColor: [200, 100, 0] },
+        9: { cellWidth: 24, halign: 'center', fontStyle: 'bold' },
       },
       alternateRowStyles: { fillColor: [248, 248, 252] },
       didParseCell: (data) => {
@@ -897,24 +772,7 @@ function StockMovementReport() {
           data.cell.styles.textColor = [26, 26, 62];
         }
       },
-      didDrawPage: (data) => {
-        // Footer on every page
-        const totalPages = doc.getNumberOfPages();
-        doc.setFontSize(7);
-        doc.setFont('helvetica', 'normal');
-        doc.setTextColor(150, 150, 150);
-        doc.text(
-          'Smart Life Contracting Company — Confidential',
-          marginL,
-          pageH - 6,
-        );
-        doc.text(
-          `Page ${data.pageNumber} of ${totalPages}`,
-          pageW - marginR,
-          pageH - 6,
-          { align: 'right' },
-        );
-      },
+      didDrawPage: (data) => drawReportFooter(doc, chrome, data.pageNumber),
       margin: { top: 50, left: marginL, right: marginR, bottom: 12 },
     });
 
@@ -928,19 +786,11 @@ function StockMovementReport() {
       notes.push('Assigned = total issued via ASN minus returned via RTN documents.');
     }
 
-    // Same reasoning: only worth saying on a report that actually has transfers
-    // on it, and worth saying there because a column that never feeds Closing
-    // otherwise reads as an arithmetic error.
-    if (hasTrfActivity) {
-      notes.push('Transferred = moved between holders on completed TRF documents in this period. Not added or subtracted: a transfer changes who holds the stock, not how much there is.');
-    }
-
     const filterParts = [];
     if (schemeFilters.length > 0) filterParts.push(`Schemes: ${schemeFilters.join(', ')}`);
     if (categoryFilters.length > 0) filterParts.push(`Categories: ${categoryFilters.join(', ')}`);
     if (conditionFilters.length > 0) filterParts.push(`Condition: ${conditionFilters.map(titleCase).join(', ')}`);
     if (rtnReasonFilters.length > 0) filterParts.push(`Return reason: ${rtnReasonFilters.join(', ')}`);
-    if (transferredOnly) filterParts.push('Transferred items only');
     if (search) filterParts.push(`Search: "${search}"`);
     if (dateFrom || dateTo) filterParts.push(`Date: ${dateFrom || 'All'} → ${dateTo || 'Today'}`);
     if (filterParts.length > 0) notes.push(`Filters applied: ${filterParts.join(' · ')}`);
@@ -959,13 +809,13 @@ function StockMovementReport() {
 
   const clearFilters = () => {
     setSearch(''); setSchemeFilters([]); setCategoryFilters([]);
-    setConditionFilters([]); setRtnReasonFilters([]); setTransferredOnly(false);
+    setConditionFilters([]); setRtnReasonFilters([]);
     // Reset dates to this month default, not empty (empty breaks date formatting)
     setDateFrom(format(startOfMonth(new Date()), 'yyyy-MM-dd'));
     setDateTo(today);
   };
   const hasFilters = !!search || schemeFilters.length > 0 || categoryFilters.length > 0
-    || conditionFilters.length > 0 || rtnReasonFilters.length > 0 || transferredOnly;
+    || conditionFilters.length > 0 || rtnReasonFilters.length > 0;
 
   /** One filter chip. Active paints the swatch solid; idle keeps it as the outline. */
   const filterChip = (label: string, color: string, active: boolean, onToggle: () => void) => (
@@ -1076,19 +926,6 @@ function StockMovementReport() {
           ))}
         </div>
 
-        {/* A row-level toggle rather than a chip row: there is only one thing to
-            ask of a transfer here — did this row move at all this period. */}
-        <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, cursor: 'pointer', width: 'fit-content' }}>
-          <input
-            type="checkbox"
-            checked={transferredOnly}
-            onChange={e => setTransferredOnly(e.target.checked)}
-          />
-          <span style={{ fontSize: 13, color: 'var(--text-2)' }}>
-            Show transferred items only
-          </span>
-        </label>
-
         {hasFilters && (
           <div style={{ marginTop: 10, fontSize: 12, color: 'var(--text-3)' }}>
             Showing <strong style={{ color: 'var(--text)' }}>{reportRows.length}</strong> of {list.length} items
@@ -1096,7 +933,6 @@ function StockMovementReport() {
             {categoryFilters.length > 0 && ` · Categories: ${categoryFilters.join(', ')}`}
             {conditionFilters.length > 0 && ` · Condition: ${conditionFilters.map(titleCase).join(', ')}`}
             {rtnReasonFilters.length > 0 && ` · Returned for: ${rtnReasonFilters.join(', ')}`}
-            {transferredOnly && ' · Transferred this period only'}
           </div>
         )}
       </div>
@@ -1106,7 +942,6 @@ function StockMovementReport() {
         {statCard('Opening Stock', totals.opening, 'var(--text)', 'var(--bg-2)')}
         {statCard('Received', totals.received, 'var(--green)', 'var(--green-dim)')}
         {statCard('Assigned', totals.assigned, 'var(--purple)', 'var(--purple-dim)')}
-        {statCard('Transferred', totals.transferred, 'var(--blue)', 'var(--blue-dim)')}
         {statCard('Issued / Used', totals.issued, 'var(--yellow)', 'var(--yellow-dim)')}
         {statCard('Closing Stock', totals.closing, 'var(--accent)', 'var(--accent-dim)')}
       </div>
@@ -1133,7 +968,6 @@ function StockMovementReport() {
                 <th style={{ textAlign: 'center', background: 'var(--bg-3)' }}>Opening</th>
                 <th style={{ textAlign: 'center', color: 'var(--green)' }}>Received</th>
                 <th style={{ textAlign: 'center', color: 'var(--purple)' }}>Assigned</th>
-                <th style={{ textAlign: 'center', color: 'var(--blue)' }}>Transferred</th>
                 <th style={{ textAlign: 'center', color: 'var(--yellow)' }}>Issued</th>
                 <th style={{ textAlign: 'center', color: 'var(--accent)' }}>Closing</th>
               </tr>
@@ -1189,9 +1023,6 @@ function StockMovementReport() {
                     <td style={{ textAlign: 'center', fontWeight: 700, color: row.assigned !== 0 ? 'var(--purple)' : 'var(--text-3)' }}>
                       {row.assigned !== 0 ? row.assigned : '—'}
                     </td>
-                    <td style={{ textAlign: 'center', fontWeight: row.transferred > 0 ? 700 : 400, color: row.transferred > 0 ? 'var(--blue)' : 'var(--text-3)' }}>
-                      {row.transferred > 0 ? `↔ ${row.transferred}` : '—'}
-                    </td>
                     <td style={{ textAlign: 'center', fontWeight: 700, color: row.issued > 0 ? 'var(--yellow)' : 'var(--text-3)' }}>
                       {row.issued > 0 ? `-${row.issued}` : '—'}
                     </td>
@@ -1211,9 +1042,6 @@ function StockMovementReport() {
                 <td style={{ textAlign: 'center', padding: '10px 16px' }}>{totals.opening}</td>
                 <td style={{ textAlign: 'center', padding: '10px 16px', color: 'var(--green)' }}>+{totals.received}</td>
                 <td style={{ textAlign: 'center', padding: '10px 16px', color: 'var(--purple)' }}>{totals.assigned}</td>
-                <td style={{ textAlign: 'center', padding: '10px 16px', color: 'var(--blue)' }}>
-                  {totals.transferred > 0 ? `↔ ${totals.transferred}` : '—'}
-                </td>
                 <td style={{ textAlign: 'center', padding: '10px 16px', color: 'var(--yellow)' }}>-{totals.issued}</td>
                 <td style={{ textAlign: 'center', padding: '10px 16px', color: 'var(--accent)', fontSize: 16 }}>{totals.closing}</td>
               </tr>
@@ -1225,7 +1053,7 @@ function StockMovementReport() {
       {/* Legend */}
       <div style={{ marginTop: 16, padding: '12px 16px', background: 'var(--bg-2)', borderRadius: 'var(--radius)', border: '1px solid var(--border)', fontSize: 12, color: 'var(--text-3)' }}>
         <strong style={{ color: 'var(--text-2)' }}>How it works:</strong>
-        {' '}Every figure is derived from documents, not from live inventory balances. Opening = received via GRN before this period · Received = received via GRN in this period · Assigned = total handed out on Assignment Forms minus what approved Return Documents (RTN) brought back, all time · Transferred = moved between holders or sites on completed Transfer Forms (TRF) in this period · Issued = consumed via the usage log in this period · <strong style={{ color: 'var(--text-2)' }}>Closing = Opening + Received − Assigned</strong>. Issued is shown but not subtracted — stock has to be assigned before it can be consumed, so it already left the warehouse under Assigned. <strong style={{ color: 'var(--text-2)' }}>Transferred</strong> is not part of the balance either: a transfer changes who holds the stock, never how much of it exists, so it is here to explain an Assigned figure that moved between periods with no hand-out or return behind it. Only items with GRN history appear, and Closing will not always match the Inventory page. <strong style={{ color: 'var(--text-2)' }}>Condition</strong> is the warehouse's own grading of the row; <strong style={{ color: 'var(--text-2)' }}>Returned As</strong> is what the most recent approved RTN said when the stock came back — a row never returned shows neither.
+        {' '}Every figure is derived from documents, not from live inventory balances. Opening = received via GRN before this period · Received = received via GRN in this period · Assigned = total handed out on Assignment Forms minus what approved Return Documents (RTN) brought back, all time · Issued = consumed via the usage log in this period · <strong style={{ color: 'var(--text-2)' }}>Closing = Opening + Received − Assigned</strong>. Issued is shown but not subtracted — stock has to be assigned before it can be consumed, so it already left the warehouse under Assigned. Only items with GRN history appear, and Closing will not always match the Inventory page. <strong style={{ color: 'var(--text-2)' }}>Condition</strong> is the warehouse's own grading of the row; <strong style={{ color: 'var(--text-2)' }}>Returned As</strong> is what the most recent approved RTN said when the stock came back — a row never returned shows neither.
       </div>
     </div>
   );

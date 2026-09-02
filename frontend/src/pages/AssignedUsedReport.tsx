@@ -6,6 +6,7 @@ import { Calendar, ClipboardList, Download, FileDown, Filter, Search } from 'luc
 import { format } from 'date-fns';
 import {
   useAssignmentForms, useRtnList, useMicList, useTransferForms, useInventory,
+  useWorkers,
 } from '../hooks/useApi';
 import MultiSelect from '../components/MultiSelect';
 import SerialNumbers from '../components/SerialNumbers';
@@ -20,7 +21,15 @@ interface AsnForm {
   id: string; assignmentNo: string; status: string;
   date?: string; createdAt?: string; updatedAt?: string;
   projectSite?: string;
+  // `assignedTo` is an eager relation on the form, so the name arrives with the
+  // document — no separate user lookup, and it resolves a recipient of any role.
+  assignedToId?: string;
+  assignedTo?: { firstName?: string; lastName?: string } | null;
   items?: AsnLine[];
+}
+
+interface WorkerOption {
+  id: string; firstName?: string; lastName?: string;
 }
 
 interface MicLine { itemCode?: string; qtyInstalled?: number; itemId?: string }
@@ -69,6 +78,12 @@ interface IssuedRow {
   closing: number;
   /** Which ASN forms it went out on, in the order they were read. */
   assignmentNos: string[];
+  /**
+   * Everyone this item was issued to, since a row is one item across every form
+   * that named it — ids for the filter to match on, names for the table to show.
+   */
+  assignedToIds: string[];
+  assignedToNames: string[];
 }
 
 const ITEM_CONDITIONS = ['new', 'good', 'fair', 'poor'];
@@ -117,10 +132,12 @@ export default function AssignedUsedReport() {
   const { data: micData = [] } = useMicList();
   const { data: transferFormsData = [] } = useTransferForms();
   const { data: inventoryData = [] } = useInventory();
+  const { data: workersData = [] } = useWorkers();
 
   const [search, setSearch] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
+  const [workerFilter, setWorkerFilter] = useState('');
   const [schemeFilters, setSchemeFilters] = useState<string[]>([]);
   const [categoryFilters, setCategoryFilters] = useState<string[]>([]);
   const [conditionFilters, setConditionFilters] = useState<string[]>([]);
@@ -214,6 +231,8 @@ export default function AssignedUsedReport() {
             transferred: 0,
             closing: 0,
             assignmentNos: [],
+            assignedToIds: [],
+            assignedToNames: [],
           };
           rows.set(key, row);
           index(row, line.itemId, invItem?.id);
@@ -222,6 +241,15 @@ export default function AssignedUsedReport() {
         row.assigned += qty;
         if (!row.assignmentNos.includes(form.assignmentNo)) {
           row.assignmentNos.push(form.assignmentNo);
+        }
+        if (form.assignedToId && !row.assignedToIds.includes(form.assignedToId)) {
+          row.assignedToIds.push(form.assignedToId);
+        }
+        const holder = form.assignedTo
+          ? `${form.assignedTo.firstName ?? ''} ${form.assignedTo.lastName ?? ''}`.trim()
+          : '';
+        if (holder && !row.assignedToNames.includes(holder)) {
+          row.assignedToNames.push(holder);
         }
       }
     }
@@ -303,12 +331,15 @@ export default function AssignedUsedReport() {
       if (schemeFilters.length && !schemeFilters.includes(row.schemeNo)) return false;
       if (categoryFilters.length && !categoryFilters.includes(row.category)) return false;
       if (conditionFilters.length && !conditionFilters.includes(row.condition)) return false;
+      // Matched on id rather than name: two people can share a name, and the
+      // form records the id whether or not the relation resolved.
+      if (workerFilter && !row.assignedToIds.includes(workerFilter)) return false;
       if (installedOnly && row.installed <= 0) return false;
       if (returnedOnly && row.returned <= 0) return false;
       if (transferredOnly && row.transferred <= 0) return false;
       return true;
     });
-  }, [allRows, search, schemeFilters, categoryFilters, conditionFilters,
+  }, [allRows, search, workerFilter, schemeFilters, categoryFilters, conditionFilters,
     installedOnly, returnedOnly, transferredOnly]);
 
   /**
@@ -339,11 +370,11 @@ export default function AssignedUsedReport() {
   }), [rows]);
 
   const clearFilters = () => {
-    setSearch(''); setDateFrom(''); setDateTo('');
+    setSearch(''); setDateFrom(''); setDateTo(''); setWorkerFilter('');
     setSchemeFilters([]); setCategoryFilters([]); setConditionFilters([]);
     setInstalledOnly(false); setReturnedOnly(false); setTransferredOnly(false);
   };
-  const hasFilters = !!search || !!dateFrom || !!dateTo
+  const hasFilters = !!search || !!dateFrom || !!dateTo || !!workerFilter
     || schemeFilters.length > 0 || categoryFilters.length > 0
     || conditionFilters.length > 0 || installedOnly || returnedOnly || transferredOnly;
 
@@ -593,7 +624,7 @@ export default function AssignedUsedReport() {
         background: 'var(--bg-2)', border: '1px solid var(--border)',
         borderRadius: 'var(--radius-lg)', padding: '14px 18px', marginBottom: 20,
       }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr auto', gap: 10, alignItems: 'end' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr auto', gap: 10, alignItems: 'end' }}>
           <div className="search-bar">
             <Search size={14} />
             <input
@@ -602,6 +633,18 @@ export default function AssignedUsedReport() {
               onChange={e => setSearch(e.target.value)}
             />
           </div>
+          <select
+            className="form-input"
+            value={workerFilter}
+            onChange={e => setWorkerFilter(e.target.value)}
+          >
+            <option value="">All Workers</option>
+            {(workersData as WorkerOption[]).map(worker => (
+              <option key={worker.id} value={worker.id}>
+                {`${worker.firstName ?? ''} ${worker.lastName ?? ''}`.trim() || worker.id}
+              </option>
+            ))}
+          </select>
           <MultiSelect
             options={schemeOptions}
             selected={schemeFilters}
@@ -686,6 +729,12 @@ export default function AssignedUsedReport() {
             {categoryFilters.length > 0 && ` · Categories: ${categoryFilters.join(', ')}`}
             {conditionFilters.length > 0 && ` · Condition: ${conditionFilters.map(titleCase).join(', ')}`}
             {(dateFrom || dateTo) && ` · Issued: ${dateFrom || 'All'} → ${dateTo || 'today'}`}
+            {workerFilter && ` · Assigned to: ${
+              (workersData as WorkerOption[])
+                .filter(w => w.id === workerFilter)
+                .map(w => `${w.firstName ?? ''} ${w.lastName ?? ''}`.trim())
+                .join('') || 'selected worker'
+            }`}
           </div>
         )}
       </div>
@@ -733,6 +782,11 @@ export default function AssignedUsedReport() {
                     {row.assignmentNos.length > 0 && (
                       <div style={{ fontSize: 10, color: 'var(--text-3)', marginTop: 3 }}>
                         {row.assignmentNos.join(', ')}
+                      </div>
+                    )}
+                    {row.assignedToNames.length > 0 && (
+                      <div style={{ fontSize: 10, color: 'var(--accent)', marginTop: 2 }}>
+                        → {row.assignedToNames.join(', ')}
                       </div>
                     )}
                   </td>

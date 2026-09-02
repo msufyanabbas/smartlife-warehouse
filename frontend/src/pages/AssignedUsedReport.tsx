@@ -313,7 +313,7 @@ export default function AssignedUsedReport() {
       'Condition': titleCase(row.condition),
       'Scheme': row.schemeNo,
       'Serial No.': row.serialNumber,
-      // 'In Stock': row.opening,
+      'In Stock': row.opening,
       'Assigned': row.assigned,
       'Installed (MIC)': row.installed,
       'Returned (RTN)': row.returned,
@@ -362,7 +362,7 @@ export default function AssignedUsedReport() {
     autoTable(doc, {
       startY: tableLabelY + 3,
       head: [['#', 'Item Code', 'Description', 'Unit', 'Condition', 'Scheme',
-        'Assigned', 'Installed', 'Returned', 'Transferred', 'Still Out']],
+        'In Stock', 'Assigned', 'Installed', 'Returned', 'Transferred', 'Still Out']],
       body: [
         ...rows.map((row, index) => [
           index + 1,
@@ -584,7 +584,7 @@ export default function AssignedUsedReport() {
                 <th>Condition</th>
                 <th>Scheme</th>
                 <th>Serial No.</th>
-                {/* <th style={{ textAlign: 'center', background: 'var(--bg-3)' }}>In Stock</th> */}
+                <th style={{ textAlign: 'center', background: 'var(--bg-3)' }}>In Stock</th>
                 <th style={{ textAlign: 'center', color: 'var(--purple)' }}>Assigned</th>
                 <th style={{ textAlign: 'center', color: 'var(--green)' }}>Installed</th>
                 <th style={{ textAlign: 'center', color: 'var(--accent)' }}>Returned</th>

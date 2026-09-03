@@ -41,10 +41,17 @@ interface MicForm { id: string; status: string; installedById?: string; items?: 
 interface RtnLine { itemCode?: string; qtyReturned?: number; itemId?: string }
 interface RtnForm { id: string; status: string; returnedById?: string; items?: RtnLine[] }
 
-interface TrfLine { itemCode?: string; qtyToTransfer?: number; itemId?: string }
+interface TrfLine {
+  itemCode?: string; qtyToTransfer?: number; itemId?: string;
+  itemDescription?: string; unit?: string; serialNumber?: string;
+}
 interface TrfForm {
   id: string; status: string;
   issuedById?: string; receivedById?: string;
+  // Eager relation, like the ASN's `assignedTo` — the receiver's name arrives
+  // with the document, so a row opened by a transfer can name its holder.
+  receivedBy?: { firstName?: string; lastName?: string } | null;
+  toProjectSite?: string;
   items?: TrfLine[];
 }
 
@@ -105,6 +112,16 @@ interface IssuedRow {
    */
   assignedToIds: string[];
   assignedToNames: string[];
+  /**
+   * Everyone this item landed on by transfer — the "Received By" of a completed
+   * TRF that credited this row's Transfer In.
+   *
+   * Kept apart from `assignedToIds`: being handed stock by a colleague is not
+   * the same claim on it as having been issued it, and a row can be opened by a
+   * transfer alone, with no assignment form behind it at all.
+   */
+  receivedByIds: string[];
+  receivedByNames: string[];
 }
 
 const ITEM_CONDITIONS = ['new', 'good', 'fair', 'poor'];
@@ -263,6 +280,8 @@ export default function AssignedUsedReport() {
             assignmentNos: [],
             assignedToIds: [],
             assignedToNames: [],
+            receivedByIds: [],
+            receivedByNames: [],
           };
           rows.set(key, row);
           index(row, line.itemId, invItem?.id);
@@ -302,6 +321,81 @@ export default function AssignedUsedReport() {
       return undefined;
     };
 
+    // Moved on. Only completed transfers: nothing has moved until then.
+    //
+    // Read before the installations and returns because a transfer can open a
+    // row of its own. Stock that reached a worker by transfer was never on an
+    // assignment form of theirs, so the loop above never opened a row for it;
+    // were this pass to run last, the MIC and RTN that account for that stock
+    // would have found no row to land on and been dropped on the floor.
+    for (const trf of (transferFormsData as TrfForm[]).filter(t => t.status === 'completed')) {
+      // Which end of this transfer the report is standing at. With no worker
+      // selected it stands at both, which is why the two totals agree.
+      const out = !workerFilter || trf.issuedById === workerFilter;
+      const into = !workerFilter || trf.receivedById === workerFilter;
+      if (!out && !into) continue;
+
+      for (const line of trf.items ?? []) {
+        const code = line.itemCode?.trim();
+        const qty = line.qtyToTransfer ?? 0;
+        if (!code || qty <= 0) continue;
+
+        let row = resolve(line);
+        // Nothing assigned this stock to the selected worker, yet a completed
+        // transfer put them at one end of it — it is theirs to answer for, so
+        // the transfer opens the row the assignment forms never did. Only with
+        // a worker selected: unnarrowed, this tab's subject is what went out on
+        // assignment forms, and stock that never did belongs to the Stock
+        // Movement tab rather than to this one.
+        if (!row && workerFilter) {
+          const invItem = (line.itemId ? invById.get(line.itemId) : undefined)
+            ?? invBySku.get(skuKey(code))
+            ?? undefined;
+          const key = line.itemId || invItem?.id || `sku:${skuKey(code)}`;
+          row = {
+            key,
+            itemCode: code,
+            itemDescription: line.itemDescription || invItem?.name || '',
+            unit: line.unit || '',
+            condition: (invItem?.condition || '').toLowerCase(),
+            schemeNo: invItem?.schemeNo || trf.toProjectSite || '',
+            category: invItem?.category || '',
+            serialNumber: line.serialNumber || invItem?.serialNumber || '',
+            // Nothing was issued to them: the row's whole story is the transfer
+            // and whatever they have done with the stock since.
+            assigned: 0,
+            installed: 0,
+            returned: 0,
+            transferOut: 0,
+            transferIn: 0,
+            closing: 0,
+            assignmentNos: [],
+            assignedToIds: [],
+            assignedToNames: [],
+            receivedByIds: [],
+            receivedByNames: [],
+          };
+          rows.set(key, row);
+          index(row, line.itemId, invItem?.id);
+        }
+        if (!row) continue;
+
+        if (out) row.transferOut += qty;
+        if (into) {
+          row.transferIn += qty;
+          if (trf.receivedById && !row.receivedByIds.includes(trf.receivedById)) {
+            row.receivedByIds.push(trf.receivedById);
+          }
+          const receiver = trf.receivedBy
+            ? `${trf.receivedBy.firstName ?? ''} ${trf.receivedBy.lastName ?? ''}`.trim()
+            : '';
+          if (receiver && !row.receivedByNames.includes(receiver)) {
+            row.receivedByNames.push(receiver);
+          }
+        }
+      }
+    }
+
     // Fitted on site. Only approved MICs: a pending confirmation is a claim.
     // Narrowed to the selected worker for the same reason as the hand-outs:
     // an Assigned figure scoped to one person against an Installed figure
@@ -325,24 +419,6 @@ export default function AssignedUsedReport() {
         if (!line.itemCode?.trim() || qty <= 0) continue;
         const row = resolve(line);
         if (row) row.returned += qty;
-      }
-    }
-
-    // Moved on. Only completed transfers: nothing has moved until then.
-    for (const trf of (transferFormsData as TrfForm[]).filter(t => t.status === 'completed')) {
-      // Which end of this transfer the report is standing at. With no worker
-      // selected it stands at both, which is why the two totals agree.
-      const out = !workerFilter || trf.issuedById === workerFilter;
-      const into = !workerFilter || trf.receivedById === workerFilter;
-      if (!out && !into) continue;
-
-      for (const line of trf.items ?? []) {
-        const qty = line.qtyToTransfer ?? 0;
-        if (!line.itemCode?.trim() || qty <= 0) continue;
-        const row = resolve(line);
-        if (!row) continue;
-        if (out) row.transferOut += qty;
-        if (into) row.transferIn += qty;
       }
     }
 
@@ -373,7 +449,7 @@ export default function AssignedUsedReport() {
     return allRows.filter(row => {
       const haystack = [
         row.itemCode, row.itemDescription, row.serialNumber, row.schemeNo,
-        ...row.assignmentNos, ...row.assignedToNames,
+        ...row.assignmentNos, ...row.assignedToNames, ...row.receivedByNames,
       ].join(' ').toLowerCase();
 
       if (q && !haystack.includes(q)) return false;
@@ -708,7 +784,7 @@ export default function AssignedUsedReport() {
             value={workerFilter}
             onChange={e => setWorkerFilter(e.target.value)}
           >
-            <option value="">All Workers</option>
+            <option value="">All Workers (assigned &amp; received)</option>
             {(workersData as WorkerOption[]).map(worker => (
               <option key={worker.id} value={worker.id}>
                 {`${worker.firstName ?? ''} ${worker.lastName ?? ''}`.trim() || worker.id}
@@ -864,6 +940,11 @@ export default function AssignedUsedReport() {
                         → {row.assignedToNames.join(', ')}
                       </div>
                     )}
+                    {row.receivedByNames.length > 0 && (
+                      <div style={{ fontSize: 10, color: 'var(--blue)', marginTop: 2 }}>
+                        ↓ {row.receivedByNames.join(', ')}
+                      </div>
+                    )}
                   </td>
                   <td style={{ fontWeight: 500 }}>{row.itemDescription || '—'}</td>
                   <td style={{ fontSize: 12, color: 'var(--text-2)' }}>{row.unit || '—'}</td>
@@ -937,7 +1018,7 @@ export default function AssignedUsedReport() {
       {/* Legend */}
       <div style={{ marginTop: 16, padding: '12px 16px', background: 'var(--bg-2)', borderRadius: 'var(--radius)', border: '1px solid var(--border)', fontSize: 12, color: 'var(--text-3)' }}>
         <strong style={{ color: 'var(--text-2)' }}>How it works:</strong>
-        {' '}One row per item, rolled up across every issued Assignment Form that named it. Assigned = handed out on issued ASN forms · Installed = fitted on approved MIC forms · Returned = brought back on approved RTN documents · Transfer Out = handed on to another holder on a completed TRF, Transfer In = taken over from one · <strong style={{ color: 'var(--text-2)' }}>Still Out = Assigned − Installed − Returned − Transfer Out + Transfer In</strong>: what the holder has yet to account for, handing stock on being one of the ways they account for it. Transfer In goes back on because that stock landed on them again — the two directions net, so a hand-out that came straight back leaves the figure unchanged. Pick a worker and the two transfer columns separate into what they let go of and what landed on them; with nobody picked every transfer is both, so the two totals agree. A date range narrows the hand-outs, not what became of them: a form issued in June stays in scope along with the installation or return booked against its stock in August.
+        {' '}One row per item, rolled up across every issued Assignment Form that named it. Assigned = handed out on issued ASN forms · Installed = fitted on approved MIC forms · Returned = brought back on approved RTN documents · Transfer Out = handed on to another holder on a completed TRF, Transfer In = taken over from one · <strong style={{ color: 'var(--text-2)' }}>Still Out = Assigned − Installed − Returned − Transfer Out + Transfer In</strong>: what the holder has yet to account for, handing stock on being one of the ways they account for it. Transfer In goes back on because that stock landed on them again — the two directions net, so a hand-out that came straight back leaves the figure unchanged. Pick a worker and the two transfer columns separate into what they let go of and what landed on them, and the tab shows everything that is theirs to answer for — stock issued to them, plus stock a completed transfer put in their hands, which carries no assignment form of theirs and is marked ↓ with the receiver's name; with nobody picked every transfer is both, so the two totals agree. A date range narrows the hand-outs, not what became of them: a form issued in June stays in scope along with the installation or return booked against its stock in August.
       </div>
     </div>
   );

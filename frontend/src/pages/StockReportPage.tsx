@@ -111,17 +111,6 @@ interface StockRow {
   received: number;
   assigned: number;
   /**
-   * What was handed out and is still unaccounted for: assigned, less what an
-   * approved MIC fitted, an approved RTN brought back, or a completed TRF
-   * handed on to someone else.
-   *
-   * All-time like `assigned`, and for the same reason — the four documents have
-   * to be read over the same span or the subtraction is between figures that do
-   * not belong to each other. A row reading zero here has had every unit it was
-   * ever issued accounted for by a document.
-   */
-  stillOut: number;
-  /**
    * How much of this row a completed TRF moved inside the period.
    *
    * Carried on the row but not shown on this tab: a transfer changes who holds
@@ -617,23 +606,6 @@ function StockMovementReport() {
           + (ambiguousSkus.has(sku) ? 0 : (rtnReturned.bySkuUnlinked.get(sku) ?? 0));
         const assigned = Math.max(0, issuedOnAsn - returnedOnRtn);
 
-        // Still Out — the same hand-out, followed through to the three documents
-        // that close it off. Transferred is read all-time here rather than from
-        // the period-scoped figure above: it is being subtracted from an
-        // all-time `assigned`, and a period slice of one against all of the
-        // other would report stock as outstanding purely because the transfer
-        // that settled it fell outside the window.
-        const installedOnMic = (micInstalled.byItemId.get(item.id) ?? 0)
-          + (ambiguousSkus.has(sku) ? 0 : (micInstalled.bySkuUnlinked.get(sku) ?? 0));
-        const transferredAllTime = [
-          ...(trfTransferred.byItemId.get(item.id) ?? []),
-          ...(ambiguousSkus.has(sku) ? [] : (trfTransferred.bySkuUnlinked.get(sku) ?? [])),
-        ].reduce((sum, move) => sum + move.qty, 0);
-        const stillOut = Math.max(
-          0,
-          issuedOnAsn - returnedOnRtn - installedOnMic - transferredAllTime,
-        );
-
         // Issued — consumption logged inside the period. Reported, but not
         // subtracted below: consuming stock requires holding it first
         // (`recordUsage` rejects usage beyond `assignedQuantity`), so it is
@@ -667,7 +639,6 @@ function StockMovementReport() {
           opening,
           received,
           assigned,
-          stillOut,
           // Deliberately absent from `closing` above: a transfer moves stock
           // between holders without creating or consuming any, so netting it
           // into the balance would report the same units leaving twice.
@@ -683,7 +654,6 @@ function StockMovementReport() {
     opening: reportRows.reduce((s, r) => s + r.opening, 0),
     received: reportRows.reduce((s, r) => s + r.received, 0),
     assigned: reportRows.reduce((s, r) => s + r.assigned, 0),
-    stillOut: reportRows.reduce((s, r) => s + r.stillOut, 0),
     issued: reportRows.reduce((s, r) => s + r.issued, 0),
     closing: reportRows.reduce((s, r) => s + r.closing, 0),
   }), [reportRows]);
@@ -711,7 +681,6 @@ function StockMovementReport() {
       'Opening': r.opening,
       'Received': r.received,
       'Assigned': r.assigned,
-      'Still Out': r.stillOut,
       'Issued': r.issued,
       'Closing': r.closing,
     }));
@@ -730,7 +699,6 @@ function StockMovementReport() {
       'Opening': totals.opening,
       'Received': totals.received,
       'Assigned': totals.assigned,
-      'Still Out': totals.stillOut,
       'Issued': totals.issued,
       'Closing': totals.closing,
     });
@@ -784,7 +752,7 @@ function StockMovementReport() {
     // ── Main table ──
     autoTable(doc, {
       startY: tableLabelY + 3,
-      head: [['#', 'Product', 'SKU', 'Scheme', 'Condition', 'Opening', 'Received', 'Assigned', 'Still Out', 'Issued', 'Closing']],
+      head: [['#', 'Product', 'SKU', 'Scheme', 'Condition', 'Opening', 'Received', 'Assigned', 'Issued', 'Closing']],
       body: [
         ...reportRows.map((row, idx) => [
           idx + 1,
@@ -795,14 +763,12 @@ function StockMovementReport() {
           row.opening || '—',
           row.received > 0 ? `+${row.received}` : '—',
           row.assigned > 0 ? String(row.assigned) : '—',
-          row.stillOut > 0 ? String(row.stillOut) : '—',
           row.issued > 0 ? `-${row.issued}` : '—',
           row.closing,
         ]),
         // Totals row
         ['', `TOTAL (${reportRows.length} items)`, '', '', '',
           totals.opening, `+${totals.received}`, totals.assigned,
-          totals.stillOut > 0 ? String(totals.stillOut) : '0',
           totals.issued > 0 ? `-${totals.issued}` : '0', totals.closing],
       ],
       styles: { fontSize: 8, cellPadding: 2.5 },
@@ -814,24 +780,18 @@ function StockMovementReport() {
         halign: 'center',
       },
       // Widths sum to contentW (269mm), so the table spans the same band as the
-      // title bar and the stats row: 8+55+28+26+20+22*6. Still Out was paid for
-      // out of the three text columns and a millimetre off each figure — it is
-      // the widest heading on the numeric run, so those could not simply be
-      // divided one further.
+      // title bar and the stats row: 8+65+31+29+21+23*5.
       columnStyles: {
         0: { cellWidth: 8, halign: 'center' },
-        1: { cellWidth: 55 },
-        2: { cellWidth: 28, font: 'courier', fontSize: 7 },
-        3: { cellWidth: 26 },
-        4: { cellWidth: 20, halign: 'center' },
-        5: { cellWidth: 22, halign: 'center' },
-        6: { cellWidth: 22, halign: 'center', textColor: [0, 150, 80] },
-        7: { cellWidth: 22, halign: 'center', textColor: [107, 47, 217] },
-        // Red: an outstanding figure is the one number on the row that asks
-        // somebody to go and find the stock.
-        8: { cellWidth: 22, halign: 'center', textColor: [239, 68, 68] },
-        9: { cellWidth: 22, halign: 'center', textColor: [200, 100, 0] },
-        10: { cellWidth: 22, halign: 'center', fontStyle: 'bold' },
+        1: { cellWidth: 65 },
+        2: { cellWidth: 31, font: 'courier', fontSize: 7 },
+        3: { cellWidth: 29 },
+        4: { cellWidth: 21, halign: 'center' },
+        5: { cellWidth: 23, halign: 'center' },
+        6: { cellWidth: 23, halign: 'center', textColor: [0, 150, 80] },
+        7: { cellWidth: 23, halign: 'center', textColor: [107, 47, 217] },
+        8: { cellWidth: 23, halign: 'center', textColor: [200, 100, 0] },
+        9: { cellWidth: 23, halign: 'center', fontStyle: 'bold' },
       },
       alternateRowStyles: { fillColor: [248, 248, 252] },
       didParseCell: (data) => {
@@ -1050,7 +1010,6 @@ function StockMovementReport() {
                 <th style={{ textAlign: 'center', background: 'var(--bg-3)' }}>Opening</th>
                 <th style={{ textAlign: 'center', color: 'var(--green)' }}>Received</th>
                 <th style={{ textAlign: 'center', color: 'var(--purple)' }}>Assigned</th>
-                <th style={{ textAlign: 'center', color: 'var(--red)' }}>Still Out</th>
                 <th style={{ textAlign: 'center', color: 'var(--yellow)' }}>Issued</th>
                 <th style={{ textAlign: 'center', color: 'var(--accent)' }}>Closing</th>
               </tr>
@@ -1106,13 +1065,6 @@ function StockMovementReport() {
                     <td style={{ textAlign: 'center', fontWeight: 700, color: row.assigned !== 0 ? 'var(--purple)' : 'var(--text-3)' }}>
                       {row.assigned !== 0 ? row.assigned : '—'}
                     </td>
-                    <td style={{
-                      textAlign: 'center',
-                      color: row.stillOut > 0 ? 'var(--red)' : 'var(--text-3)',
-                      fontWeight: row.stillOut > 0 ? 700 : 400,
-                    }}>
-                      {row.stillOut > 0 ? row.stillOut : '—'}
-                    </td>
                     <td style={{ textAlign: 'center', fontWeight: 700, color: row.issued > 0 ? 'var(--yellow)' : 'var(--text-3)' }}>
                       {row.issued > 0 ? `-${row.issued}` : '—'}
                     </td>
@@ -1132,9 +1084,6 @@ function StockMovementReport() {
                 <td style={{ textAlign: 'center', padding: '10px 16px' }}>{totals.opening}</td>
                 <td style={{ textAlign: 'center', padding: '10px 16px', color: 'var(--green)' }}>+{totals.received}</td>
                 <td style={{ textAlign: 'center', padding: '10px 16px', color: 'var(--purple)' }}>{totals.assigned}</td>
-                <td style={{ textAlign: 'center', padding: '10px 16px', color: totals.stillOut > 0 ? 'var(--red)' : 'var(--text-3)' }}>
-                  {totals.stillOut > 0 ? totals.stillOut : '—'}
-                </td>
                 <td style={{ textAlign: 'center', padding: '10px 16px', color: 'var(--yellow)' }}>-{totals.issued}</td>
                 <td style={{ textAlign: 'center', padding: '10px 16px', color: 'var(--accent)', fontSize: 16 }}>{totals.closing}</td>
               </tr>
@@ -1146,7 +1095,7 @@ function StockMovementReport() {
       {/* Legend */}
       <div style={{ marginTop: 16, padding: '12px 16px', background: 'var(--bg-2)', borderRadius: 'var(--radius)', border: '1px solid var(--border)', fontSize: 12, color: 'var(--text-3)' }}>
         <strong style={{ color: 'var(--text-2)' }}>How it works:</strong>
-        {' '}Every figure is derived from documents, not from live inventory balances. Opening = received via GRN before this period · Received = received via GRN in this period · Assigned = total handed out on Assignment Forms minus what approved Return Documents (RTN) brought back, all time · <strong style={{ color: 'var(--text-2)' }}>Still Out = Assigned − Installed (MIC) − Transferred (TRF)</strong>, all time — what was handed out and no document has yet accounted for · Issued = consumed via the usage log in this period · <strong style={{ color: 'var(--text-2)' }}>Closing = Opening + Received − Assigned</strong>. Issued is shown but not subtracted — stock has to be assigned before it can be consumed, so it already left the warehouse under Assigned. Only items with GRN history appear, and Closing will not always match the Inventory page. <strong style={{ color: 'var(--text-2)' }}>Condition</strong> is the warehouse's own grading of the row; <strong style={{ color: 'var(--text-2)' }}>Returned As</strong> is what the most recent approved RTN said when the stock came back — a row never returned shows neither.
+        {' '}Every figure is derived from documents, not from live inventory balances. Opening = received via GRN before this period · Received = received via GRN in this period · Assigned = total handed out on Assignment Forms minus what approved Return Documents (RTN) brought back, all time · Issued = consumed via the usage log in this period · <strong style={{ color: 'var(--text-2)' }}>Closing = Opening + Received − Assigned</strong>. Issued is shown but not subtracted — stock has to be assigned before it can be consumed, so it already left the warehouse under Assigned. Only items with GRN history appear, and Closing will not always match the Inventory page. <strong style={{ color: 'var(--text-2)' }}>Condition</strong> is the warehouse's own grading of the row; <strong style={{ color: 'var(--text-2)' }}>Returned As</strong> is what the most recent approved RTN said when the stock came back — a row never returned shows neither.
       </div>
     </div>
   );

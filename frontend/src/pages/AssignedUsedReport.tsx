@@ -84,11 +84,14 @@ interface IssuedRow {
   transferIn: number;
   /**
    * What is still out and unaccounted for: assigned, less installed, returned
-   * and transferred.
+   * and the net of the two transfer directions.
    *
-   * Transferred comes off because the question this column answers is what the
-   * holder still has to account for, and a transfer is them accounting for it —
-   * the stock is someone else's to answer for from that point. Floored at zero:
+   * Transfer out comes off because the question this column answers is what the
+   * holder still has to account for, and handing stock on is them accounting for
+   * it — the stock is someone else's to answer for from that point. Transfer in
+   * goes back on for the mirror reason: it landed on them and they answer for it
+   * again. The two net, so stock that went out and came back leaves the figure
+   * untouched rather than being deducted for a move that undid itself. Floored at zero:
    * an ad-hoc return adjusts inventory without ever being written back to the
    * ASN that issued it, so a hand-out given back that way can be netted off
    * twice. Matches the Still Out column on the Stock Movement tab.
@@ -345,10 +348,14 @@ export default function AssignedUsedReport() {
 
     return [...rows.values()].map(row => ({
       ...row,
-      // Only the outgoing side comes off. Stock transferred *in* arrived on
-      // somebody else's assignment form and is already accounted for on their
-      // row; adding it here would count the same units on two rows at once.
-      closing: Math.max(0, row.assigned - row.installed - row.returned - row.transferOut),
+      // Both sides of a transfer count. Out is stock the holder handed on and
+      // no longer answers for; in is stock that landed back on them and they do.
+      // They net out: 33 out and 33 in leaves the holder exactly where they
+      // started, so the pair must cancel rather than the out side alone biting.
+      closing: Math.max(
+        0,
+        row.assigned - row.installed - row.returned - row.transferOut + row.transferIn,
+      ),
     }));
   }, [formsData, inventoryData, micData, rtnData, transferFormsData, dateFrom, dateTo, workerFilter]);
 
@@ -599,7 +606,7 @@ export default function AssignedUsedReport() {
     });
 
     const notes = [
-      'Still Out = Assigned − Installed − Returned − Transfer Out: what the holder has yet to account for. Transfer In is not added — that stock is accounted for on the row of whoever it was assigned to.',
+      'Still Out = Assigned − Installed − Returned − Transfer Out + Transfer In: what the holder has yet to account for. The two transfer directions net off — stock handed on and then taken back leaves the holder where they started.',
       'Every figure is derived from documents: issued ASN forms, approved MIC and RTN documents, completed TRF documents. A date range narrows the hand-outs, not what became of them.',
     ];
     const filterParts = [];
@@ -930,7 +937,7 @@ export default function AssignedUsedReport() {
       {/* Legend */}
       <div style={{ marginTop: 16, padding: '12px 16px', background: 'var(--bg-2)', borderRadius: 'var(--radius)', border: '1px solid var(--border)', fontSize: 12, color: 'var(--text-3)' }}>
         <strong style={{ color: 'var(--text-2)' }}>How it works:</strong>
-        {' '}One row per item, rolled up across every issued Assignment Form that named it. Assigned = handed out on issued ASN forms · Installed = fitted on approved MIC forms · Returned = brought back on approved RTN documents · Transfer Out = handed on to another holder on a completed TRF, Transfer In = taken over from one · <strong style={{ color: 'var(--text-2)' }}>Still Out = Assigned − Installed − Returned − Transfer Out</strong>: what the holder has yet to account for, handing stock on being one of the ways they account for it. Transfer In is not added — that stock arrived on somebody else's assignment form and is accounted for on their row. Pick a worker and the two transfer columns separate into what they let go of and what landed on them; with nobody picked every transfer is both, so the two totals agree. A date range narrows the hand-outs, not what became of them: a form issued in June stays in scope along with the installation or return booked against its stock in August.
+        {' '}One row per item, rolled up across every issued Assignment Form that named it. Assigned = handed out on issued ASN forms · Installed = fitted on approved MIC forms · Returned = brought back on approved RTN documents · Transfer Out = handed on to another holder on a completed TRF, Transfer In = taken over from one · <strong style={{ color: 'var(--text-2)' }}>Still Out = Assigned − Installed − Returned − Transfer Out + Transfer In</strong>: what the holder has yet to account for, handing stock on being one of the ways they account for it. Transfer In goes back on because that stock landed on them again — the two directions net, so a hand-out that came straight back leaves the figure unchanged. Pick a worker and the two transfer columns separate into what they let go of and what landed on them; with nobody picked every transfer is both, so the two totals agree. A date range narrows the hand-outs, not what became of them: a form issued in June stays in scope along with the installation or return booked against its stock in August.
       </div>
     </div>
   );

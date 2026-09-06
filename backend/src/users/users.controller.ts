@@ -3,13 +3,14 @@ import {
   Get,
   Post,
   Put,
+  Patch,
   Delete,
   Body,
   Param,
   UseGuards,
 } from '@nestjs/common';
 import { UsersService } from './users.service';
-import { CreateUserDto, UpdateUserDto } from './dto/user.dto';
+import { CreateUserDto, UpdateUserDto, ResetPasswordDto } from './dto/user.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -69,5 +70,18 @@ export class UsersController {
   @Roles(Role.ADMIN)
   deactivate(@Param('id') id: string) {
     return this.usersService.deactivate(id);
+  }
+
+  // Managers get in here too, unlike the rest of the write endpoints — they are
+  // the ones a worker walks up to after forgetting a password. Which accounts a
+  // manager may touch is decided in the service, not by the role guard.
+  @Patch(':id/reset-password')
+  @Roles(Role.ADMIN, Role.MANAGER)
+  resetPassword(
+    @Param('id') id: string,
+    @Body() dto: ResetPasswordDto,
+    @CurrentUser() user: User,
+  ) {
+    return this.usersService.resetPassword(id, dto.newPassword, user);
   }
 }

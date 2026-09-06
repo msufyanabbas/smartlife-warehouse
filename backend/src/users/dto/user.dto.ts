@@ -65,3 +65,9 @@ export class UpdateUserDto {
   @IsBoolean()
   isActive?: boolean;
 }
+
+export class ResetPasswordDto {
+  @IsString()
+  @MinLength(6, { message: 'Password must be at least 6 characters' })
+  newPassword: string;
+}

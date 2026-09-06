@@ -134,6 +134,19 @@ export const useDeleteUser = () => {
   });
 };
 
+/**
+ * Set another user's password. Managers may call this as well as admins, but
+ * only for workers — the server has the final say on who may reset whom.
+ */
+export const useResetPassword = () => {
+  return useMutation({
+    mutationFn: ({ id, newPassword }: { id: string; newPassword: string }) =>
+      api.patch(`/users/${id}/reset-password`, { newPassword }).then(r => r.data.data),
+    onSuccess: () => toast.success('Password reset successfully'),
+    onError: (e: any) => toast.error(e.response?.data?.message || 'Failed to reset password'),
+  });
+};
+
 // ── Assignments ────────────────────────────────────────────────────────────
 /** Every assignment, returned ones included — needed to value a past period. */
 export const useAssignmentHistory = () =>

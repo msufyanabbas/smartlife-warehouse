@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { Plus, Search, Users, Edit2, UserX, Trash2 } from 'lucide-react';
-import { useUsers, useCreateUser, useUpdateUser, useDeleteUser, useDeactivateUser } from '../hooks/useApi';
+import { Plus, Search, Users, Edit2, UserX, Trash2, KeyRound, Eye, EyeOff } from 'lucide-react';
+import { useUsers, useCreateUser, useUpdateUser, useDeleteUser, useDeactivateUser, useResetPassword } from '../hooks/useApi';
 import { useAuth } from '../contexts/AuthContext';
 import { User } from '../types';
 import Modal from '../components/Modal';
@@ -129,8 +129,18 @@ export default function UsersPage() {
   const updateUser = useUpdateUser();
   const deleteUser = useDeleteUser();
   const deactivateUser = useDeactivateUser();
+  const resetPassword = useResetPassword();
 
   const isAdmin = currentUser?.role === 'admin';
+  const isManager = currentUser?.role === 'manager';
+
+  // Mirrors the rule the server enforces: a manager may only reset a worker, an
+  // admin anyone but a fellow admin — their own account excepted.
+  const canResetPassword = (u: User) => {
+    if (isAdmin) return u.role !== 'admin' || u.id === currentUser?.id;
+    if (isManager) return u.role === 'worker';
+    return false;
+  };
 
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState('');
@@ -138,6 +148,11 @@ export default function UsersPage() {
   const [editTarget, setEditTarget] = useState<User | null>(null);
   const [createForm, setCreateForm] = useState<any>({ role: 'worker' });
   const [editForm, setEditForm] = useState<any>({});
+  const [resetTarget, setResetTarget] = useState<User | null>(null);
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [passwordError, setPasswordError] = useState('');
 
   const list = (users as User[]).filter(u => {
     const q = search.toLowerCase();
@@ -207,6 +222,33 @@ export default function UsersPage() {
     setEditTarget(null);
   };
 
+  const closeReset = () => {
+    setResetTarget(null);
+    setNewPassword('');
+    setConfirmPassword('');
+    setShowNewPassword(false);
+    setPasswordError('');
+  };
+
+  const handleResetPassword = async () => {
+    if (!resetTarget) return;
+    setPasswordError('');
+    if (newPassword.length < 6) {
+      setPasswordError('Password must be at least 6 characters');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setPasswordError('Passwords do not match');
+      return;
+    }
+    try {
+      await resetPassword.mutateAsync({ id: resetTarget.id, newPassword });
+      closeReset();
+    } catch {
+      // The hook already surfaces the server's message as a toast.
+    }
+  };
+
   return (
     <div className="page">
       <div className="page-header flex items-center justify-between">
@@ -258,7 +300,7 @@ export default function UsersPage() {
                 <th>Department</th>
                 <th>Status</th>
                 <th>Joined</th>
-                {isAdmin && <th>Actions</th>}
+                {(isAdmin || isManager) && <th>Actions</th>}
               </tr>
             </thead>
             <tbody>
@@ -289,13 +331,24 @@ export default function UsersPage() {
                   <td style={{ color: 'var(--text-3)', fontSize: 12 }}>
                     {new Date(u.createdAt).toLocaleDateString()}
                   </td>
-                  {isAdmin && (
+                  {(isAdmin || isManager) && (
                     <td>
                       <div className="flex gap-2">
-                        <button className="btn btn-ghost btn-sm btn-icon" onClick={() => openEdit(u)}>
-                          <Edit2 size={14} />
-                        </button>
-                        {u.id !== currentUser?.id && (
+                        {isAdmin && (
+                          <button className="btn btn-ghost btn-sm btn-icon" onClick={() => openEdit(u)}>
+                            <Edit2 size={14} />
+                          </button>
+                        )}
+                        {canResetPassword(u) && (
+                          <button
+                            className="btn btn-ghost btn-sm btn-icon"
+                            title="Reset password"
+                            onClick={() => { setResetTarget(u); setPasswordError(''); }}
+                          >
+                            <KeyRound size={14} />
+                          </button>
+                        )}
+                        {isAdmin && u.id !== currentUser?.id && (
                           <button
                             className="btn btn-danger btn-sm btn-icon"
                             title="Deactivate"
@@ -307,7 +360,7 @@ export default function UsersPage() {
                             <UserX size={14} />
                           </button>
                         )}
-                        {u.id !== currentUser?.id && (
+                        {isAdmin && u.id !== currentUser?.id && (
                           <button
                             className="btn btn-danger btn-sm btn-icon"
                             title="Delete permanently"
@@ -369,6 +422,104 @@ export default function UsersPage() {
         }
       >
         <UserForm form={editForm} setForm={setEditForm} />
+      </Modal>
+
+      {/* Reset Password Modal */}
+      <Modal
+        isOpen={!!resetTarget}
+        onClose={closeReset}
+        title="Reset Password"
+        size="sm"
+        footer={
+          <>
+            <button className="btn btn-ghost" onClick={closeReset}>Cancel</button>
+            <button
+              className="btn btn-primary"
+              onClick={handleResetPassword}
+              disabled={resetPassword.isPending || !newPassword || !confirmPassword}
+            >
+              {resetPassword.isPending ? 'Resetting…' : 'Reset Password'}
+            </button>
+          </>
+        }
+      >
+        <p style={{ color: 'var(--text-2)', fontSize: 13, marginBottom: 16 }}>
+          Set a new password for{' '}
+          <strong style={{ color: 'var(--text)' }}>
+            {resetTarget?.firstName} {resetTarget?.lastName}
+          </strong>. They will need it the next time they sign in.
+        </p>
+
+        <div className="form-group">
+          <label className="form-label">New Password *</label>
+          <div style={{ position: 'relative' }}>
+            <input
+              type={showNewPassword ? 'text' : 'password'}
+              className="form-input"
+              style={{ paddingRight: 36 }}
+              value={newPassword}
+              onChange={e => setNewPassword(e.target.value)}
+              placeholder="Min 6 characters"
+              autoFocus
+            />
+            <button
+              type="button"
+              title={showNewPassword ? 'Hide password' : 'Show password'}
+              style={{
+                position: 'absolute', right: 10, top: '50%',
+                transform: 'translateY(-50%)',
+                background: 'none', border: 'none', padding: 0,
+                cursor: 'pointer', color: 'var(--text-3)', display: 'flex',
+              }}
+              onClick={() => setShowNewPassword(!showNewPassword)}
+            >
+              {showNewPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+            </button>
+          </div>
+        </div>
+
+        <div className="form-group">
+          <label className="form-label">Confirm Password *</label>
+          <input
+            type={showNewPassword ? 'text' : 'password'}
+            className="form-input"
+            value={confirmPassword}
+            onChange={e => setConfirmPassword(e.target.value)}
+            placeholder="Repeat password"
+            onKeyDown={e => { if (e.key === 'Enter') handleResetPassword(); }}
+          />
+        </div>
+
+        {newPassword && (
+          <div style={{ marginTop: -4 }}>
+            <div style={{ height: 4, borderRadius: 2, background: 'var(--border)', overflow: 'hidden' }}>
+              <div style={{
+                height: '100%',
+                transition: 'all 0.2s',
+                width: newPassword.length >= 12 ? '100%'
+                  : newPassword.length >= 8 ? '66%'
+                  : newPassword.length >= 6 ? '33%' : '10%',
+                background: newPassword.length >= 12 ? 'var(--green)'
+                  : newPassword.length >= 8 ? 'var(--yellow)'
+                  : newPassword.length >= 6 ? '#f97316' : 'var(--red)',
+              }} />
+            </div>
+            <div style={{ fontSize: 11, marginTop: 4, color: 'var(--text-3)' }}>
+              {newPassword.length >= 12 ? 'Strong'
+                : newPassword.length >= 8 ? 'Good'
+                : newPassword.length >= 6 ? 'Weak' : 'Too short'}
+            </div>
+          </div>
+        )}
+
+        {passwordError && (
+          <div style={{
+            color: 'var(--red)', fontSize: 13, marginTop: 12,
+            padding: '8px 12px', background: 'var(--red-dim)', borderRadius: 6,
+          }}>
+            {passwordError}
+          </div>
+        )}
       </Modal>
     </div>
   );

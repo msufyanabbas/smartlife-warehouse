@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   ConflictException,
+  ForbiddenException,
   BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -69,6 +70,40 @@ export class UsersService {
     const user = await this.findOne(id);
     await this.userRepository.remove(user);
     return { message: 'User deleted successfully' };
+  }
+
+  /**
+   * Set someone else's password, for the case where they have lost theirs.
+   *
+   * The role guard lets both admins and managers in, so the narrower rule lives
+   * here: a manager may only reset a worker, and an admin may reset anyone but a
+   * fellow admin (their own account excepted). Without that second clause any
+   * admin could lock out every other admin.
+   */
+  async resetPassword(targetId: string, newPassword: string, currentUser: User) {
+    const target = await this.findOne(targetId);
+
+    if (currentUser?.role === Role.MANAGER && target.role !== Role.WORKER) {
+      throw new ForbiddenException('Managers can only reset worker passwords');
+    }
+
+    if (
+      currentUser?.role === Role.ADMIN &&
+      target.role === Role.ADMIN &&
+      target.id !== currentUser.id
+    ) {
+      throw new ForbiddenException("Cannot reset another admin's password");
+    }
+
+    if (!newPassword || newPassword.length < 6) {
+      throw new BadRequestException('Password must be at least 6 characters');
+    }
+
+    // Same cost factor as `create`, so a reset password verifies like any other.
+    target.password = await bcrypt.hash(newPassword, 12);
+    await this.userRepository.save(target);
+
+    return { message: 'Password reset successfully' };
   }
 
   async deactivate(id: string) {

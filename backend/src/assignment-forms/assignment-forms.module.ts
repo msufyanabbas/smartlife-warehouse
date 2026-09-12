@@ -6,10 +6,11 @@ import { AssignmentForm } from './entities/assignment-form.entity';
 import { Assignment } from '../assignments/entities/assignment.entity';
 import { InventoryItem } from '../inventory/entities/inventory-item.entity';
 import { InventoryModule } from '../inventory/inventory.module';
+import { RtnDocument } from '../rtn/entities/rtn-document.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([AssignmentForm, Assignment, InventoryItem]),
+    TypeOrmModule.forFeature([AssignmentForm, Assignment, InventoryItem, RtnDocument]),
     InventoryModule,
   ],
   providers: [AssignmentFormsService],

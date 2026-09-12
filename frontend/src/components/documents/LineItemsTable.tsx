@@ -370,10 +370,12 @@ export default function LineItemsTable({
  * The row holds a string ("one for all") or an array (one per unit); the backend
  * flattens both into the same comma-separated field.
  */
-function SerialNumberCell({ qty, value, onChange }: {
+function SerialNumberCell({ qty, value, onChange, invalid }: {
   qty: number;
   value: string | string[];
   onChange: (value: string | string[]) => void;
+  /** Draws the inputs in the warning colour; the message itself sits below the cell. */
+  invalid?: boolean;
 }) {
   // A saved line comes back as "SN-1, SN-2, SN-3", so more than one serial means
   // it was last filled in per unit and should reopen that way.
@@ -406,11 +408,13 @@ function SerialNumberCell({ qty, value, onChange }: {
     </button>
   );
 
+  const invalidStyle = invalid ? { borderColor: 'var(--red)' } : undefined;
+
   if (qty <= 1) {
     return (
       <input
         className="doc-input"
-        style={{ fontFamily: 'monospace' }}
+        style={{ fontFamily: 'monospace', ...invalidStyle }}
         value={firstSerial}
         placeholder="Serial No."
         onChange={e => onChange(e.target.value)}
@@ -441,7 +445,7 @@ function SerialNumberCell({ qty, value, onChange }: {
             <input
               key={i}
               className="doc-input"
-              style={{ fontFamily: 'monospace', fontSize: 11, padding: '2px 6px' }}
+              style={{ fontFamily: 'monospace', fontSize: 11, padding: '2px 6px', ...invalidStyle }}
               value={unitSerial(i)}
               placeholder={`Unit ${i + 1}`}
               onChange={e => {
@@ -455,7 +459,7 @@ function SerialNumberCell({ qty, value, onChange }: {
       ) : (
         <input
           className="doc-input"
-          style={{ fontFamily: 'monospace' }}
+          style={{ fontFamily: 'monospace', ...invalidStyle }}
           value={firstSerial}
           placeholder="Serial (all units)"
           onChange={e => onChange(e.target.value)}
@@ -482,12 +486,24 @@ function Cell({ row, column, readOnly, onChange }: {
   }
 
   if (column.type === 'serial') {
+    // Same channel the number cells use: the document decides what counts as
+    // wrong — a serial still out with another worker, say — and is also
+    // responsible for refusing to save while it stands; this only draws it.
+    const warning = column.warn?.(row);
     return (
-      <SerialNumberCell
-        qty={Number(column.qtyKey ? row[column.qtyKey] : 0) || 0}
-        value={value ?? ''}
-        onChange={onChange}
-      />
+      <>
+        <SerialNumberCell
+          qty={Number(column.qtyKey ? row[column.qtyKey] : 0) || 0}
+          value={value ?? ''}
+          onChange={onChange}
+          invalid={!!warning}
+        />
+        {warning && (
+          <div style={{ fontSize: 11, color: 'var(--red)', marginTop: 2, lineHeight: 1.3 }}>
+            {warning}
+          </div>
+        )}
+      </>
     );
   }
 

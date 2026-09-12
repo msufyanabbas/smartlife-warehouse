@@ -14,9 +14,10 @@ import {
 import { Assignment, AssignmentStatus } from '../assignments/entities/assignment.entity';
 import { InventoryItem } from '../inventory/entities/inventory-item.entity';
 import { InventoryService } from '../inventory/inventory.service';
+import { RtnDocument, RtnStatus } from '../rtn/entities/rtn-document.entity';
 import { User } from '../users/entities/user.entity';
 import { generateRefNumber } from '../common/utils/generate-ref-number';
-import { joinSerials } from '../common/utils/serial-numbers';
+import { joinSerials, serialKey, splitSerials } from '../common/utils/serial-numbers';
 
 @Injectable()
 export class AssignmentFormsService {
@@ -27,6 +28,8 @@ export class AssignmentFormsService {
     private assignmentRepository: Repository<Assignment>,
     @InjectRepository(InventoryItem)
     private inventoryRepository: Repository<InventoryItem>,
+    @InjectRepository(RtnDocument)
+    private rtnRepository: Repository<RtnDocument>,
     private inventoryService: InventoryService,
   ) {}
 
@@ -48,7 +51,10 @@ export class AssignmentFormsService {
       items: normalizeItems(dto.items),
     });
 
-    if (doc.status === AssignmentFormStatus.ISSUED) assertIssuable(doc);
+    if (doc.status === AssignmentFormStatus.ISSUED) {
+      assertIssuable(doc);
+      await this.assertSerialsAvailable(doc.items);
+    }
 
     const saved = await this.formRepository.save(doc);
     if (saved.status === AssignmentFormStatus.ISSUED) {
@@ -85,7 +91,15 @@ export class AssignmentFormsService {
 
     // Checked before the save: a form that persists as `issued` without opening
     // any assignment is the thing that makes the stock report read zero.
-    if (!wasIssued && doc.status === AssignmentFormStatus.ISSUED) assertIssuable(doc);
+    if (!wasIssued && doc.status === AssignmentFormStatus.ISSUED) {
+      assertIssuable(doc);
+      await this.assertSerialsAvailable(doc.items, id);
+    } else if (wasIssued && dto.items) {
+      // An issued form stays editable, and rewriting its serials is the same
+      // double-booking by another route — the units are already in someone's
+      // hands, so the line cannot be re-pointed at a serial that is out.
+      await this.assertSerialsAvailable(doc.items, id);
+    }
 
     const saved = await this.formRepository.save(doc);
     if (!wasIssued && saved.status === AssignmentFormStatus.ISSUED) {
@@ -141,6 +155,102 @@ export class AssignmentFormsService {
       await this.inventoryRepository.update(item.itemId, { assignmentFormId: form.id });
     }
   }
+
+  /**
+   * A serial names one physical unit, so it can only be in one pair of hands at
+   * a time: issuing it a second time while it is still out books the same unit
+   * to two workers and leaves the Assigned & Used report double-counting it.
+   *
+   * What is still out is derived from the documents rather than the assignments
+   * table, which records quantities per item and never the serials themselves.
+   * Issuing a form puts its serials out; approving an RTN brings them back. The
+   * two are netted as counts, not flags, because the same serial legitimately
+   * goes out again after each return — and reissuing has to stay possible or the
+   * first hand-out of a tool would be its last.
+   */
+  private async serialsStillOut(excludeFormId?: string) {
+    const [issuedForms, returns] = await Promise.all([
+      this.formRepository.find({
+        where: { status: AssignmentFormStatus.ISSUED },
+        // Oldest first, so a return cancels the hand-out it actually followed
+        // and the form reported back is the one holding the unit now.
+        order: { createdAt: 'ASC' },
+      }),
+      this.rtnRepository.find({ where: { status: RtnStatus.APPROVED } }),
+    ]);
+
+    const returned = new Map<string, number>();
+    for (const doc of returns) {
+      for (const line of doc.items ?? []) {
+        for (const serial of splitSerials(line.serialNumbers)) {
+          const key = serialKey(line.itemCode, serial);
+          returned.set(key, (returned.get(key) ?? 0) + 1);
+        }
+      }
+    }
+
+    const out = new Map<string, { serial: string; form: AssignmentForm }>();
+    for (const form of issuedForms) {
+      if (excludeFormId && form.id === excludeFormId) continue;
+      for (const line of form.items ?? []) {
+        for (const serial of splitSerials(line.serialNumber)) {
+          const key = serialKey(line.itemCode, serial);
+          const pending = returned.get(key) ?? 0;
+          if (pending > 0) {
+            returned.set(key, pending - 1);
+            out.delete(key);
+            continue;
+          }
+          out.set(key, { serial, form });
+        }
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Refuses to issue a form that would hand out a serial someone is already
+   * holding. Every clash is collected before throwing: fixing them one round
+   * trip at a time is what makes a fifteen-line form unfillable.
+   */
+  private async assertSerialsAvailable(items: AssignmentFormLineItem[], currentFormId?: string) {
+    const lines = (items ?? []).filter(line => (line.qtyIssued ?? 0) > 0);
+    if (!lines.some(line => splitSerials(line.serialNumber).length)) return;
+
+    const clashes: string[] = [];
+
+    // Two lines of the same form claiming one serial is the same double-booking
+    // and would otherwise slip past — neither has been issued yet, so nothing
+    // already on record contradicts it.
+    const seen = new Set<string>();
+    for (const line of lines) {
+      for (const serial of splitSerials(line.serialNumber)) {
+        const key = serialKey(line.itemCode, serial);
+        if (seen.has(key)) {
+          clashes.push(
+            `Serial number "${serial}" is entered twice on this form for item "${line.itemCode}".`,
+          );
+        }
+        seen.add(key);
+      }
+    }
+
+    const out = await this.serialsStillOut(currentFormId);
+    for (const line of lines) {
+      for (const serial of splitSerials(line.serialNumber)) {
+        const holder = out.get(serialKey(line.itemCode, serial));
+        if (!holder) continue;
+        const who = fullName(holder.form.assignedTo) || 'another worker';
+        clashes.push(
+          `Serial number "${serial}" for item "${line.itemCode}" is already assigned to ` +
+          `${who} on ${holder.form.assignmentNo}. It has to come back on a return (RTN) ` +
+          `before it can be assigned again.`,
+        );
+      }
+    }
+
+    if (clashes.length) throw new BadRequestException(clashes.join(' '));
+  }
 }
 
 /**
@@ -168,6 +278,9 @@ function assertIssuable(form: AssignmentForm) {
     );
   }
 }
+
+const fullName = (user?: User | null) =>
+  [user?.firstName, user?.lastName].filter(Boolean).join(' ').trim();
 
 function normalizeItems(items?: AssignmentFormItemDto[]): AssignmentFormLineItem[] {
   return (items ?? [])

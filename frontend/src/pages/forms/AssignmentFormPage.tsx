@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { AlertCircle, ArrowLeft, ClipboardList, Eye, Plus, Printer, Save } from 'lucide-react';
 import { format } from 'date-fns';
 import toast from 'react-hot-toast';
@@ -18,6 +18,7 @@ import {
   fullName, orUndefined, printDate, printSerials, toDateInput, today,
 } from '../../components/documents/formUtils';
 import { useDocumentStock } from '../../hooks/useDocumentStock';
+import { useSerialsInUse } from '../../hooks/useSerialsInUse';
 import type { AssignmentForm, User } from '../../types';
 
 const MIN_ROWS = 15;
@@ -37,7 +38,13 @@ const PRINT_COLUMNS: PrintColumn[] = [
   { key: 'serialNumber', label: 'Serial Number(s)', render: row => printSerials(row.serialNumber) },
 ];
 
-const COLUMNS: LineColumn[] = [
+/**
+ * `serialWarning` comes from the form rather than the column, because what makes
+ * a serial wrong is everything issued elsewhere — the table only draws it.
+ */
+const buildColumns = (
+  serialWarning: (itemCode: string | undefined, value: string | string[] | undefined) => string | undefined,
+): LineColumn[] => [
   { key: 'itemCode', label: 'Item Code', width: '11%' },
   { key: 'itemDescription', label: 'Item Description', width: '24%' },
   { key: 'unit', label: 'Unit', width: '7%' },
@@ -79,6 +86,15 @@ const COLUMNS: LineColumn[] = [
   {
     key: 'serialNumber', label: 'Serial Number(s)', type: 'serial', qtyKey: 'qtyIssued',
     width: '14%', hint: 'Serial Number(s) — enter one for the line, or one per unit issued',
+    // A serial names one physical unit, so handing it out while it is still with
+    // someone else books the same unit to two workers. The server refuses the
+    // issue either way; flagging it here saves the round trip.
+    //
+    // Only once the line is actually being issued: picking an item pre-fills its
+    // serial, and a row that hands nothing over is not a double-booking yet.
+    warn: row => ((Number(row.qtyIssued) || 0) > 0
+      ? serialWarning(row.itemCode, row.serialNumber)
+      : undefined),
   },
 ];
 
@@ -226,12 +242,28 @@ function AssignmentEditor({ id, doc, onClose, onCreated }: {
 }) {
   const { data: users = [] } = useUsers();
   const { resolveStock } = useDocumentStock();
+  // The form's own serials are its own business — they clash only with what is
+  // out on *other* documents.
+  const { serialWarning } = useSerialsInUse(id);
   const createForm = useCreateAssignmentForm();
   const updateForm = useUpdateAssignmentForm();
 
   const [form, setForm] = useState<FormState>(() => toFormState(doc));
   const [rows, setRows] = useState<LineRow[]>(() => toLineRows(doc?.items, MIN_ROWS, ROW_DEFAULTS));
   const [preview, setPreview] = useState(false);
+
+  const columns = useMemo(() => buildColumns(serialWarning), [serialWarning]);
+
+  // Every line whose serials are already out with someone else. Only lines that
+  // are actually being issued matter: a serial typed against a zero quantity
+  // hands nothing over.
+  const serialClashes = useMemo(
+    () => rows
+      .filter(row => (Number(row.qtyIssued) || 0) > 0)
+      .map(row => serialWarning(row.itemCode, row.serialNumber))
+      .filter(Boolean) as string[],
+    [rows, serialWarning],
+  );
 
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) =>
     setForm(prev => ({ ...prev, [key]: value }));
@@ -258,6 +290,10 @@ function AssignmentEditor({ id, doc, onClose, onCreated }: {
       }
       if (!total) {
         toast.error('Enter a Qty Issued on at least one line before issuing.');
+        return;
+      }
+      if (serialClashes.length) {
+        toast.error(`Serial already assigned — ${serialClashes[0]}.`);
         return;
       }
       const confirmed = window.confirm(
@@ -315,7 +351,14 @@ function AssignmentEditor({ id, doc, onClose, onCreated }: {
           <button className="btn btn-ghost btn-sm" onClick={() => save('approved')} disabled={saving || alreadyIssued}>
             <Save size={14} /> Approve
           </button>
-          <button className="btn btn-primary btn-sm" onClick={() => save('issued')} disabled={saving}>
+          <button
+            className="btn btn-primary btn-sm"
+            onClick={() => save('issued')}
+            disabled={saving || (!alreadyIssued && serialClashes.length > 0)}
+            title={!alreadyIssued && serialClashes.length
+              ? 'Clear the serial numbers that are still out with another worker first'
+              : undefined}
+          >
             <Save size={14} /> {alreadyIssued ? 'Save' : 'Issue Items'}
           </button>
         </div>
@@ -339,6 +382,28 @@ function AssignmentEditor({ id, doc, onClose, onCreated }: {
             <span style={{ fontSize: 13, color: 'var(--blue)', fontWeight: 500 }}>
               This form has been issued. You can edit any field and save changes.
             </span>
+          </div>
+        )}
+
+        {!alreadyIssued && serialClashes.length > 0 && (
+          <div style={{
+            display: 'flex', alignItems: 'flex-start', gap: 8,
+            background: 'var(--red-dim)',
+            border: '1px solid rgba(239,68,68,0.3)',
+            borderRadius: 'var(--radius)', padding: '10px 14px', marginBottom: 16,
+          }}>
+            <AlertCircle size={16} color="var(--red)" style={{ flexShrink: 0, marginTop: 2 }} />
+            <div style={{ fontSize: 13, color: 'var(--red)', fontWeight: 500 }}>
+              {serialClashes.length === 1
+                ? 'A serial number on this form is still out with another worker:'
+                : 'Some serial numbers on this form are still out with other workers:'}
+              <ul style={{ margin: '4px 0 0', paddingLeft: 18, fontWeight: 400 }}>
+                {serialClashes.map(clash => <li key={clash}>{clash}</li>)}
+              </ul>
+              <div style={{ marginTop: 4, fontWeight: 400 }}>
+                They have to come back on a return (RTN) before they can be assigned again.
+              </div>
+            </div>
           </div>
         )}
 
@@ -393,7 +458,7 @@ function AssignmentEditor({ id, doc, onClose, onCreated }: {
         <LineItemsTable
           rows={rows}
           onChange={setRows}
-          columns={COLUMNS}
+          columns={columns}
           source="inventory"
           stockField="stockAvailable"
           resolveStock={resolveStock}

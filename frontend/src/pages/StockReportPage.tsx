@@ -153,6 +153,16 @@ const matchKey = (sku?: string, schemeNo?: string) =>
   `${(sku || '').trim().toLowerCase()}|${(schemeNo || '').trim().toLowerCase()}`;
 
 /**
+ * What makes two inventory rows the same line of this report: their SKU, and
+ * nothing else. A product is reported once however it was stocked — across
+ * GRNs, and across schemes, whose numbers the merged row lists side by side.
+ * Rows carrying no SKU at all fall back to their product name, which is the
+ * only other thing that identifies them.
+ */
+const rowKey = (item: { sku?: string; name?: string }) =>
+  (item.sku || '').trim().toLowerCase() || (item.name || '').trim().toLowerCase();
+
+/**
  * Two different vocabularies, deliberately kept apart.
  *
  * An inventory row is graded new / good / fair / poor — that is the shelf's own
@@ -514,41 +524,23 @@ function StockMovementReport() {
   }, [usage]);
 
   /**
-   * SKUs that reach this report on more than one row — that is, SKUs stocked
-   * under more than one scheme, since every row below merges all the inventory
-   * rows sharing a SKU *and* a scheme.
-   *
-   * An unlinked ASN line names only a SKU, so where a SKU spans several rows
-   * there is no telling which of them it came out of — crediting it to each
-   * would report the same hand-out several times over. Those rows show only
-   * what their linked lines prove. A SKU that resolves to a single row is not
-   * ambiguous however many GRNs put stock on it: all of them now land on that
-   * one row.
-   */
-  const ambiguousSkus = useMemo(() => {
-    const rowsPerSku = new Map<string, Set<string>>();
-    for (const item of list) {
-      const sku = matchKey(item.sku);
-      const rows = rowsPerSku.get(sku) ?? new Set<string>();
-      rows.add(matchKey(item.sku, item.schemeNo));
-      rowsPerSku.set(sku, rows);
-    }
-    return new Set([...rowsPerSku].filter(([, rows]) => rows.size > 1).map(([sku]) => sku));
-  }, [list]);
-
-  /**
-   * One row per SKU per scheme, not one per inventory row.
+   * One row per SKU, not one per inventory row.
    *
    * A product received on two GRNs sits on two inventory rows — a receipt only
    * upserts onto an existing SKU within a scheme — and reporting each of them
    * separately listed the same product twice, each line holding a slice of its
-   * stock. The rows are therefore grouped by SKU + scheme and reported as one.
+   * stock. Rows are therefore grouped by SKU alone and reported as one, across
+   * schemes as well as GRNs; the scheme numbers merged into a row are listed on
+   * it, and the scheme filter, which runs before the grouping, is what narrows
+   * the figures back down to one scheme.
    *
    * Which makes the lookups below group-wide. The quantity maps are keyed by
    * inventory row id, so a group's figure is the sum across its rows; the SKU
    * fallbacks, which exist for document lines that never named a row, are added
    * once for the whole group rather than once per row it merged — that, not the
-   * summing, is where a merge could double-count.
+   * summing, is where a merge could double-count. They no longer need guarding
+   * against a SKU sitting on several rows, since a SKU now resolves to exactly
+   * one row: an unlinked line naming it has one place to land.
    */
   const reportRows = useMemo((): StockRow[] => {
     const from = dateFrom ? new Date(dateFrom + 'T00:00:00') : new Date('2000-01-01T00:00:00');
@@ -556,11 +548,9 @@ function StockMovementReport() {
 
     /**
      * The verdict the last approved return left on this row, resolved the same
-     * way its quantity was: by row id, falling back to SKU only where that SKU
-     * sits on a single row — on a SKU spread over several rows there is no
-     * telling which one the return came off, and guessing would label the wrong
-     * stock Damaged. Where several of the merged rows carry a verdict, the most
-     * recently approved of them wins.
+     * way its quantity was: by row id, falling back to the SKU for returns that
+     * never named a row. Where several of the merged rows carry a verdict, the
+     * most recently approved of them wins.
      */
     const returnVerdict = (items: InventoryItem[]): RtnVerdict | undefined => {
       const linked = items
@@ -568,8 +558,7 @@ function StockMovementReport() {
         .filter((detail): detail is RtnVerdict => !!detail)
         .sort((a, b) => b.at - a.at);
       if (linked.length) return linked[0];
-      const sku = matchKey(items[0].sku);
-      return ambiguousSkus.has(sku) ? undefined : rtnDetail.bySkuUnlinked.get(sku);
+      return rtnDetail.bySkuUnlinked.get(matchKey(items[0].sku));
     };
 
     /**
@@ -579,19 +568,15 @@ function StockMovementReport() {
      * side: a linked and an unlinked line are different lines on different
      * forms, and taking only the first would under-report the movement. The
      * unlinked lines are added once for the group rather than once per row it
-     * merged — they name a SKU, and that SKU now resolves to this row alone.
-     * An unlinked line on a SKU spread over several rows is dropped: there is
-     * no telling which of them it came off, and crediting every one would
-     * report the same transfer several times over.
+     * merged — they name a SKU, and that SKU resolves to this row alone.
      *
      * A form with no date at all is counted in every period rather than
      * vanishing from all of them.
      */
     const transferredInPeriod = (items: InventoryItem[]) => {
-      const sku = matchKey(items[0].sku);
       const moves = [
         ...items.flatMap(item => trfTransferred.byItemId.get(item.id) ?? []),
-        ...(ambiguousSkus.has(sku) ? [] : (trfTransferred.bySkuUnlinked.get(sku) ?? [])),
+        ...(trfTransferred.bySkuUnlinked.get(matchKey(items[0].sku)) ?? []),
       ];
       return moves
         .filter(m => !m.date || (m.date >= from && m.date <= to))
@@ -621,7 +606,7 @@ function StockMovementReport() {
 
     const groups = new Map<string, InventoryItem[]>();
     for (const item of visible) {
-      const key = matchKey(item.sku, item.schemeNo);
+      const key = rowKey(item);
       const group = groups.get(key) ?? [];
       group.push(item);
       groups.set(key, group);
@@ -635,8 +620,10 @@ function StockMovementReport() {
       .map((items): StockRow => {
         // Everything not derived from a document reads off the first row of the
         // group. What it supplies is either shared by the whole group by
-        // construction (SKU, scheme) or describes the same product either way
-        // (name, category), so no figure rides on the choice.
+        // construction (SKU) or describes the same product either way (name,
+        // category), so no figure rides on the choice. The fields the rows can
+        // genuinely differ on — scheme, GRN, serial, grade — are merged below
+        // rather than taken from it.
         const primary = items[0];
         const sku = matchKey(primary.sku);
         const verdict = returnVerdict(items);
@@ -664,10 +651,9 @@ function StockMovementReport() {
         // on the issue side: a linked and an unlinked line are different lines,
         // and missing one of them would leave stock reading as still out.
         const linkedIssued = items.reduce((s, item) => s + (asnIssued.byItemId.get(item.id) ?? 0), 0);
-        const issuedOnAsn = linkedIssued
-          || (ambiguousSkus.has(sku) ? 0 : (asnIssued.bySkuUnlinked.get(sku) ?? 0));
+        const issuedOnAsn = linkedIssued || (asnIssued.bySkuUnlinked.get(sku) ?? 0);
         const returnedOnRtn = items.reduce((s, item) => s + (rtnReturned.byItemId.get(item.id) ?? 0), 0)
-          + (ambiguousSkus.has(sku) ? 0 : (rtnReturned.bySkuUnlinked.get(sku) ?? 0));
+          + (rtnReturned.bySkuUnlinked.get(sku) ?? 0);
         const assigned = Math.max(0, issuedOnAsn - returnedOnRtn);
 
         // Issued — consumption logged inside the period. Reported, but not
@@ -703,7 +689,7 @@ function StockMovementReport() {
           name: primary.name,
           sku: primary.sku,
           serialNumber: joinDistinct(items.flatMap(item => splitSerials(item.serialNumber))),
-          schemeNo: primary.schemeNo || '',
+          schemeNo: joinDistinct(items.map(item => item.schemeNo || '')),
           grnNo: joinDistinct(items.map(item => item.grnNo || '')),
           category: primary.category || '',
           condition,
@@ -725,7 +711,7 @@ function StockMovementReport() {
       // narrows to stock that came back for it, so a row with no approved return
       // drops out rather than matching on blank.
       .filter(row => !rtnReasonFilters.length || rtnReasonFilters.includes(row.rtnReason));
-  }, [list, usageByItem, receiptsByItem, asnIssued, rtnReturned, rtnDetail, trfTransferred, micInstalled, ambiguousSkus, dateFrom, dateTo, search, schemeFilters, categoryFilters, conditionFilters, rtnReasonFilters]);
+  }, [list, usageByItem, receiptsByItem, asnIssued, rtnReturned, rtnDetail, trfTransferred, micInstalled, dateFrom, dateTo, search, schemeFilters, categoryFilters, conditionFilters, rtnReasonFilters]);
 
   // Totals
   const totals = useMemo(() => ({
